@@ -94,8 +94,8 @@ class BookingDirectBookingServiceTests {
         assertThat(saved.getStatus()).isEqualTo(BookingRequestStatus.PENDING_APPROVAL);
         assertThat(saved.getRequestType()).isEqualTo(BookingRequestType.ADMIN_DIRECT_BOOKING);
         assertThat(saved.getRequestedByUserId()).isEqualTo(actorId);
-        verify(domainEvents).record(eq("BookingRequested"), eq("BOOKING_REQUEST"), any(),
-                anyLong(), eq(NOW), anyList(), anyMap());
+        verify(domainEvents).record(eq(2), eq("BookingRequested"), eq("BOOKING_REQUEST"), isNull(),
+                anyLong(), eq(NOW), anyList(), argThat(facts -> "NONE".equals(facts.get("notificationRoute"))));
         verify(confirmationService, never()).confirm(any(), any(), any());
     }
 

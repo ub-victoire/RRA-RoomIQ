@@ -1,6 +1,9 @@
 package rw.rra.roomiq.notification.domain.repository;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -8,9 +11,10 @@ import rw.rra.roomiq.notification.domain.entity.Notification;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
-public interface NotificationRepository extends JpaRepository<Notification, UUID> {
+public interface NotificationRepository extends JpaRepository<Notification, UUID>, JpaSpecificationExecutor<Notification> {
     @Modifying
     @Query(value = """
             INSERT INTO notification
@@ -67,4 +71,10 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
     List<Notification> findDueRemindersForUpdate(@Param("resourceType") String resourceType,
                                                   @Param("resourceId") UUID resourceId,
                                                   @Param("now") Instant now);
+
+    Optional<Notification> findByIdAndRecipientUserId(UUID notificationId, UUID recipientUserId);
+
+    Page<Notification> findByRecipientUserIdOrderByCreatedAtDesc(UUID recipientUserId, Pageable pageable);
+
+    List<Notification> findAllByRecipientUserIdOrderByCreatedAtDesc(UUID recipientUserId);
 }

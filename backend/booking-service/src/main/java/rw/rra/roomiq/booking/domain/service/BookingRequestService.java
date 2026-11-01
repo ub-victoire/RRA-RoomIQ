@@ -28,7 +28,10 @@ import rw.rra.roomiq.common.web.DomainException;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.List;
 import java.util.Map;
@@ -166,9 +169,12 @@ public class BookingRequestService {
                     "Only a draft booking request can be submitted");
         }
         BookingRequest submitted = repository.saveAndFlush(bookingRequest);
-        domainEvents.record("BookingRequested", "BOOKING_REQUEST", submitted.getId(), submitted.getVersion(),
-                now, List.of(submitted.getRequestedByUserId()), Map.of(
+        domainEvents.record(2, "BookingRequested", "BOOKING_REQUEST", submitted.getId(), submitted.getVersion(),
+                now, List.of(), Map.of(
                         "requesterUserId", submitted.getRequestedByUserId().toString(),
+                        "departmentId", submitted.getDepartmentId().toString(),
+                        "vipRoom", references.vipRoom(),
+                        "notificationRoute", "SCOPED_ADMIN_REQUEST",
                         "roomId", submitted.getRoomId().toString(),
                         "requestReference", submitted.getRequestReference()));
         return BookingRequestResponse.from(submitted);
@@ -209,6 +215,17 @@ public class BookingRequestService {
             throw new DomainException(HttpStatus.BAD_REQUEST, "IDEMPOTENCY_KEY_INVALID",
                     "Idempotency-Key must contain 1-128 ASCII letters, digits, dots, underscores, colons, or hyphens");
         }
+    }
+
+    private static List<UUID> trustedRecipients(UUID... recipients) {
+        List<UUID> unique = new ArrayList<>();
+        Set<UUID> seen = new HashSet<>();
+        for (UUID recipient : recipients) {
+            if (recipient != null && seen.add(recipient)) {
+                unique.add(recipient);
+            }
+        }
+        return List.copyOf(unique);
     }
 
     static String currentBearerToken() {

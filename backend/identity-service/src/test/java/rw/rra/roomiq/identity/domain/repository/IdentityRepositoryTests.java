@@ -153,6 +153,32 @@ class IdentityRepositoryTests {
                 """, Integer.class)).isZero();
     }
 
+    @Test
+    void notificationRecipientQueryReturnsOnlyActiveAdminsInTheBuildingScope() {
+        UUID buildingId = UUID.randomUUID();
+        UUID otherBuildingId = UUID.randomUUID();
+        Role adminRole = roleRepository.saveAndFlush(new Role("ADMIN", "Building Admin", false));
+        Role secretaryRole = roleRepository.saveAndFlush(new Role("SECRETARY", "Secretary", false));
+        AppUser activeAdmin = appUserRepository.saveAndFlush(
+                new AppUser("active-admin-" + UUID.randomUUID() + "@rra.rw", "Active Admin", UserStatus.ACTIVE));
+        AppUser inactiveAdmin = appUserRepository.saveAndFlush(
+                new AppUser("inactive-admin-" + UUID.randomUUID() + "@rra.rw", "Inactive Admin", UserStatus.DISABLED));
+        AppUser otherBuildingAdmin = appUserRepository.saveAndFlush(
+                new AppUser("other-admin-" + UUID.randomUUID() + "@rra.rw", "Other Building Admin",
+                        UserStatus.ACTIVE));
+        AppUser activeSecretary = appUserRepository.saveAndFlush(
+                new AppUser("active-secretary-" + UUID.randomUUID() + "@rra.rw", "Active Secretary",
+                        UserStatus.ACTIVE));
+
+        userRoleRepository.saveAndFlush(new UserRole(activeAdmin, adminRole, buildingId, null));
+        userRoleRepository.saveAndFlush(new UserRole(inactiveAdmin, adminRole, buildingId, null));
+        userRoleRepository.saveAndFlush(new UserRole(otherBuildingAdmin, adminRole, otherBuildingId, null));
+        userRoleRepository.saveAndFlush(new UserRole(activeSecretary, secretaryRole, buildingId, null));
+
+        assertThat(userRoleRepository.findActiveAdminUserIdsByBuildingId(buildingId))
+                .containsExactly(activeAdmin.getId());
+    }
+
         private Set<String> importedForeignKeyColumns(String tableName) {
                 try (Connection connection = jdbcTemplate.getDataSource().getConnection();
                          ResultSet importedKeys = connection.getMetaData().getImportedKeys(

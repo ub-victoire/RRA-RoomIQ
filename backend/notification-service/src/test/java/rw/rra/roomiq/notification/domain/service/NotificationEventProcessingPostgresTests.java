@@ -10,6 +10,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.web.server.ResponseStatusException;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -125,6 +126,31 @@ class NotificationEventProcessingPostgresTests {
     }
 
     @Test
+    void identityResolutionFailureRollsBackNewRequestReceiptAndEffects() {
+        NotificationEvent event = scopedAdminRequestEvent();
+
+        assertThatThrownBy(() -> processingService.process(event))
+                .isInstanceOf(ResponseStatusException.class);
+
+        assertThat(count("notification_event_receipt")).isZero();
+        assertThat(count("notification")).isZero();
+    }
+
+    @Test
+    void duplicateRequestReceiptIsAcknowledgedWithoutCallingUnavailableIdentity() {
+        NotificationEvent event = scopedAdminRequestEvent();
+        receiptRepository.saveAndFlush(new rw.rra.roomiq.notification.domain.entity.NotificationEventReceipt(
+                UUID.randomUUID(), event.eventId(), event.sourceService(), event.eventType(), event.eventVersion(),
+                event.aggregateType(), event.aggregateId(), event.aggregateVersion(), event.correlationId(),
+                event.causationId(), event.resourceType(), event.resourceId(), Instant.now()));
+
+        assertThat(processingService.process(event))
+                .isEqualTo(NotificationEventProcessingService.ProcessingResult.DUPLICATE);
+        assertThat(count("notification_event_receipt")).isEqualTo(1);
+        assertThat(count("notification")).isZero();
+    }
+
+    @Test
     void concurrentDuplicateDeliveriesCommitOnlyOneSetOfEffects() throws Exception {
         NotificationEvent event = event(List.of(UUID.randomUUID(), UUID.randomUUID()));
         CountDownLatch ready = new CountDownLatch(2);
@@ -208,17 +234,38 @@ class NotificationEventProcessingPostgresTests {
         UUID recipientId = UUID.randomUUID();
         Instant now = Instant.now();
 
-        assertThat(processingService.process(meetingReleasedEvent(reservationId, now)))
+        NotificationEvent release = meetingReleasedEvent(reservationId, now);
+        assertThat(processingService.process(release))
                 .isEqualTo(NotificationEventProcessingService.ProcessingResult.PROCESSED_WITHOUT_NOTIFICATIONS);
+        assertThat(processingService.process(release))
+                .isEqualTo(NotificationEventProcessingService.ProcessingResult.DUPLICATE);
         assertThat(processingService.process(reminderEvent(UUID.randomUUID(), reservationId, recipientId,
                 now.plus(Duration.ofHours(1)), 15)))
                 .isEqualTo(NotificationEventProcessingService.ProcessingResult.PROCESSED_WITHOUT_NOTIFICATIONS);
 
         assertThat(countReminderRows()).isZero();
+        assertThat(count("notification")).isZero();
         assertThat(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM notification_event_receipt
                 WHERE resource_type = 'RESERVATION' AND resource_id = ?
                 """, Integer.class, reservationId)).isEqualTo(2);
+    }
+
+    @Test
+    void completionAndReleaseEventsKeepReceiptsButSuppressConfiguredRecipientEffects() {
+        UUID reservationId = UUID.randomUUID();
+        Instant now = Instant.now();
+        NotificationEvent completion = meetingCompletedEvent(reservationId, now);
+        NotificationEvent release = meetingReleasedEvent(reservationId, now.plusSeconds(1));
+
+        assertThat(processingService.process(completion))
+                .isEqualTo(NotificationEventProcessingService.ProcessingResult.PROCESSED_WITHOUT_NOTIFICATIONS);
+        assertThat(processingService.process(release))
+                .isEqualTo(NotificationEventProcessingService.ProcessingResult.PROCESSED_WITHOUT_NOTIFICATIONS);
+        assertThat(processingService.process(completion))
+                .isEqualTo(NotificationEventProcessingService.ProcessingResult.DUPLICATE);
+        assertThat(count("notification_event_receipt")).isEqualTo(2);
+        assertThat(count("notification")).isZero();
     }
 
     @Test
@@ -350,6 +397,32 @@ class NotificationEventProcessingPostgresTests {
         return codec.decode(json.getBytes(StandardCharsets.UTF_8));
     }
 
+    private NotificationEvent scopedAdminRequestEvent() {
+        String json = """
+                {
+                  "eventId": "%s",
+                  "sourceService": "booking-service",
+                  "eventType": "BookingRequested",
+                  "eventVersion": 2,
+                  "aggregateType": "BOOKING_REQUEST",
+                  "aggregateId": "%s",
+                  "aggregateVersion": 1,
+                  "correlationId": "request-routing-correlation",
+                  "causationId": null,
+                  "occurredAt": "%s",
+                  "payload": {
+                    "recipientUserIds": [],
+                    "requesterUserId": "%s",
+                    "departmentId": "%s",
+                    "vipRoom": false,
+                    "notificationRoute": "SCOPED_ADMIN_REQUEST"
+                  }
+                }
+                """.formatted(UUID.randomUUID(), UUID.randomUUID(), Instant.now(),
+                UUID.randomUUID(), UUID.randomUUID());
+        return codec.decode(json.getBytes(StandardCharsets.UTF_8));
+    }
+
     private NotificationEvent meetingReleasedEvent(UUID reservationId, Instant releasedAt) {
         String json = """
                 {
@@ -364,7 +437,7 @@ class NotificationEventProcessingPostgresTests {
                   "causationId": null,
                   "occurredAt": "%s",
                   "payload": {
-                    "recipientUserIds": [],
+                    "recipientUserIds": ["%s", "%s"],
                     "meetingId": "%s",
                     "reservationId": "%s",
                     "releasedByUserId": "%s",
@@ -372,7 +445,32 @@ class NotificationEventProcessingPostgresTests {
                   }
                 }
                 """.formatted(UUID.randomUUID(), UUID.randomUUID(), releasedAt,
-                UUID.randomUUID(), reservationId, UUID.randomUUID(), releasedAt);
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), reservationId, UUID.randomUUID(), releasedAt);
+        return codec.decode(json.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private NotificationEvent meetingCompletedEvent(UUID reservationId, Instant completedAt) {
+        String json = """
+                {
+                  "eventId": "%s",
+                  "sourceService": "booking-service",
+                  "eventType": "MeetingCompleted",
+                  "eventVersion": 1,
+                  "aggregateType": "MEETING",
+                  "aggregateId": "%s",
+                  "aggregateVersion": 1,
+                  "correlationId": "completion-correlation",
+                  "causationId": null,
+                  "occurredAt": "%s",
+                  "payload": {
+                    "recipientUserIds": ["%s", "%s"],
+                    "meetingId": "%s",
+                    "reservationId": "%s",
+                    "completedAt": "%s"
+                  }
+                }
+                """.formatted(UUID.randomUUID(), UUID.randomUUID(), completedAt,
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), reservationId, completedAt);
         return codec.decode(json.getBytes(StandardCharsets.UTF_8));
     }
 
@@ -388,7 +486,7 @@ class NotificationEventProcessingPostgresTests {
                 {
                   "eventId": "%s",
                   "sourceService": "booking-service",
-                  "eventType": "BookingRequested",
+                  "eventType": "BookingRejected",
                   "eventVersion": 1,
                   "aggregateType": "BOOKING_REQUEST",
                   "aggregateId": "%s",
@@ -398,10 +496,13 @@ class NotificationEventProcessingPostgresTests {
                   "occurredAt": "2026-10-12T12:00:00Z",
                   "payload": {
                     "recipientUserIds": %s,
-                    "requesterUserId": "%s"
+                    "requesterUserId": "%s",
+                    "decidedByUserId": "%s",
+                    "decision": "REJECTED"
                   }
                 }
-                """.formatted(UUID.randomUUID(), UUID.randomUUID(), recipientJson, UUID.randomUUID());
+                """.formatted(UUID.randomUUID(), UUID.randomUUID(), recipientJson, UUID.randomUUID(),
+                UUID.randomUUID());
         return codec.decode(json.getBytes(StandardCharsets.UTF_8));
     }
 

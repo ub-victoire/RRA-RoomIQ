@@ -172,6 +172,43 @@ class BookingDecisionPostgresTests {
     }
 
     @Test
+    void submittedSecretaryRequestPublishesVersionTwoScopedAdminRoutingFacts() {
+        UUID requesterId = UUID.randomUUID();
+        UUID departmentId = UUID.randomUUID();
+        UUID roomId = UUID.randomUUID();
+        UUID buildingId = UUID.randomUUID();
+        BookingRequest draft = bookingRequests.saveAndFlush(new BookingRequest(
+                "BR-" + UUID.randomUUID(), BookingRequestType.SECRETARY_REQUEST, requesterId,
+                departmentId, roomId, buildingId, null, "Routing test", "Purpose", START, END, 3,
+                false, BookingRequestStatus.DRAFT, "request-routing-test", Instant.now()));
+        when(authorizationClient.authorizeCurrentCaller(any(BookingAuthorizationRequest.class)))
+                .thenReturn(requesterId);
+        configureOwnerValidation(draft, 15);
+
+        bookingRequestService.submit(draft.getId());
+
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT event_version FROM booking_event_outbox
+                WHERE event_type = 'BookingRequested' AND aggregate_id = ?
+                """, Integer.class, draft.getId())).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT payload -> 'payload' ->> 'notificationRoute'
+                FROM booking_event_outbox
+                WHERE event_type = 'BookingRequested' AND aggregate_id = ?
+                """, String.class, draft.getId())).isEqualTo("SCOPED_ADMIN_REQUEST");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT payload -> 'payload' ->> 'requesterUserId'
+                FROM booking_event_outbox
+                WHERE event_type = 'BookingRequested' AND aggregate_id = ?
+                """, String.class, draft.getId())).isEqualTo(requesterId.toString());
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT jsonb_array_length(payload -> 'payload' -> 'recipientUserIds')
+                FROM booking_event_outbox
+                WHERE event_type = 'BookingRequested' AND aggregate_id = ?
+                """, Integer.class, draft.getId())).isZero();
+    }
+
+    @Test
     void approvalCommitsDecisionRequestReservationMeetingAndRequesterOrganizerTogether() {
         BookingRequest request = pendingRequest(UUID.randomUUID(), UUID.randomUUID(), START, END);
         configureAuthorization(request, UUID.randomUUID());
@@ -233,6 +270,11 @@ class BookingDecisionPostgresTests {
                 FROM booking_event_outbox
                 WHERE event_type = 'BookingApproved' AND aggregate_id = ?
                 """, String.class, request.getId())).isEqualTo(request.getRequestedByUserId().toString());
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT payload -> 'payload' ->> 'decisionComment'
+                FROM booking_event_outbox
+                WHERE event_type = 'BookingApproved' AND aggregate_id = ?
+                """, String.class, request.getId())).isEqualTo("Approved by admin");
         assertThat(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM booking_event_outbox
                 WHERE event_type = 'Reminder' AND aggregate_id = ?
@@ -332,7 +374,14 @@ class BookingDecisionPostgresTests {
 
     @Test
     void checkInAndCompletionSetIndependentServerTimestampsAtomically() throws SQLException {
-        Reservation reservation = confirmedReservation(UUID.randomUUID(), UUID.randomUUID(), START, END);
+        UUID organizerId = UUID.randomUUID();
+        UUID participantId = UUID.randomUUID();
+        Reservation reservation = confirmedReservation(organizerId, UUID.randomUUID(), START, END);
+        Meeting meeting = meetings.findByReservation_Id(reservation.getId()).orElseThrow();
+        participants.saveAndFlush(new rw.rra.roomiq.booking.domain.entity.MeetingParticipant(
+                meeting, organizerId, null, null, ParticipantRole.ORGANIZER, InviteStatus.ACCEPTED));
+        participants.saveAndFlush(new rw.rra.roomiq.booking.domain.entity.MeetingParticipant(
+                meeting, participantId, null, null, ParticipantRole.REQUIRED, InviteStatus.ACCEPTED));
         UUID actor = UUID.randomUUID();
         when(authorizationClient.authorizeReservationLifecycle(
                 reservation.getOrganizerUserId(), reservation.getBookingRequest().getDepartmentId(),
@@ -363,12 +412,12 @@ class BookingDecisionPostgresTests {
                 SELECT (status = 'COMPLETED') = (completed_at IS NOT NULL)
                 FROM reservation WHERE id = ?
                 """, Boolean.class, reservation.getId())).isTrue();
-        assertThat(jdbcTemplate.queryForObject("""
-                SELECT COUNT(*) FROM booking_event_outbox
+        String completedPayload = jdbcTemplate.queryForObject("""
+                SELECT payload::text FROM booking_event_outbox
                 WHERE event_type = 'MeetingCompleted'
-                  AND payload -> 'payload' ->> 'meetingId' = ?
-                """, Integer.class, meetings.findByReservation_Id(reservation.getId()).orElseThrow()
-                .getId().toString())).isEqualTo(1);
+                  AND payload -> 'payload' ->> 'reservationId' = ?
+                """, String.class, reservation.getId().toString());
+        assertThat(completedPayload).contains(organizerId.toString()).contains(participantId.toString());
     }
 
     @Test
@@ -811,6 +860,20 @@ class BookingDecisionPostgresTests {
         assertThat(replay.extensionId()).isEqualTo(created.extensionId());
         assertThat(extensions.findAll()).filteredOn(extension -> extension.getReservation().getId()
                 .equals(reservation.getId())).hasSize(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT event_version FROM booking_event_outbox
+                WHERE event_type = 'ExtensionRequested' AND aggregate_id = ?
+                """, Integer.class, created.extensionId())).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT payload -> 'payload' ->> 'notificationRoute'
+                FROM booking_event_outbox
+                WHERE event_type = 'ExtensionRequested' AND aggregate_id = ?
+                """, String.class, created.extensionId())).isEqualTo("SCOPED_ADMIN_REQUEST");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT jsonb_array_length(payload -> 'payload' -> 'recipientUserIds')
+                FROM booking_event_outbox
+                WHERE event_type = 'ExtensionRequested' AND aggregate_id = ?
+                """, Integer.class, created.extensionId())).isZero();
         assertThatThrownBy(() -> extensionService.request(reservation.getId(),
                 new CreateBookingExtensionRequest(END.plusSeconds(7_200)), "extension-idempotency"))
                 .isInstanceOf(DomainException.class)

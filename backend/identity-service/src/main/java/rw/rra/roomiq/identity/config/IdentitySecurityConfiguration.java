@@ -97,7 +97,10 @@ public class IdentitySecurityConfiguration {
                     .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html",
                         "/actuator/health")
                         .permitAll()
-                        .anyRequest().authenticated())
+                    .requestMatchers(HttpMethod.POST,
+                    "/api/v1/internal/notifications/recipient-resolution")
+                    .permitAll()
+                    .anyRequest().authenticated())
                 .formLogin(form -> form.disable())
                 .httpBasic(basic -> basic.disable())
                 .logout(logout -> logout.disable())

@@ -84,8 +84,14 @@ public class ReservationLifecycleService {
         var meeting = meetings.findByReservation_Id(completed.getId()).orElseThrow(() ->
                 new DomainException(HttpStatus.SERVICE_UNAVAILABLE, "BOOKING_MEETING_INCONSISTENT",
                         "A completed reservation has no persisted meeting"));
+        List<UUID> recipients = Stream.concat(Stream.of(completed.getOrganizerUserId()),
+                        participants.findAllByMeeting_IdOrderById(meeting.getId()).stream()
+                                .map(participant -> participant.getUserId()))
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
         domainEvents.record("MeetingCompleted", "MEETING", meeting.getId(), 0,
-                completed.getCompletedAt(), List.of(completed.getOrganizerUserId()), Map.of(
+                completed.getCompletedAt(), recipients, Map.of(
                         "meetingId", meeting.getId().toString(),
                         "completedAt", completed.getCompletedAt().toString(),
                         "reservationId", completed.getId().toString()));

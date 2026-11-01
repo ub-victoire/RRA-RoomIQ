@@ -82,6 +82,19 @@ public class Notification {
         this.createdAt = createdAt;
     }
 
+    public Notification(UUID id, UUID recipientUserId, String eventType, String resourceType,
+                        UUID resourceId, String payload, Instant createdAt, String status) {
+        this.id = id;
+        this.recipientUserId = recipientUserId;
+        this.eventType = eventType;
+        this.resourceType = resourceType;
+        this.resourceId = resourceId;
+        this.channel = "IN_APP";
+        this.payload = payload;
+        this.createdAt = createdAt;
+        this.status = status;
+    }
+
     public UUID getId() { return id; }
     public UUID getRecipientUserId() { return recipientUserId; }
     public String getEventType() { return eventType; }
@@ -91,7 +104,16 @@ public class Notification {
     public String getStatus() { return status; }
     public Instant getScheduledAt() { return scheduledAt; }
     public Instant getCancelledAt() { return cancelledAt; }
+    public String getPayload() { return payload; }
+    public Instant getReadAt() { return readAt; }
     public Instant getCreatedAt() { return createdAt; }
+
+    public void markRead(Instant readAt) {
+        if (readAt == null) {
+            throw new IllegalArgumentException("Read timestamp is required");
+        }
+        this.readAt = readAt;
+    }
 
     public void makePending() {
         if (!"SCHEDULED".equals(status)) {

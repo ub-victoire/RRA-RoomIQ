@@ -25,9 +25,12 @@ import rw.rra.roomiq.common.web.DomainException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -109,7 +112,7 @@ public class BookingCancellationService {
                 false, null, now));
         bookingRequests.saveAndFlush(bookingRequest);
         domainEvents.record("BookingCancelled", "CANCELLATION", cancellation.getId(), 0, now,
-                List.of(bookingRequest.getRequestedByUserId()), Map.of(
+                trustedRecipients(bookingRequest.getRequestedByUserId(), authorization.actorUserId()), Map.of(
                         "cancelledByUserId", authorization.actorUserId().toString(),
                         "reasonCode", request.reasonCode().name(),
                         "bookingRequestId", bookingRequest.getId().toString()));
@@ -168,11 +171,23 @@ public class BookingCancellationService {
                 authorization.actorUserId(), request.reasonCode(), request.reason().trim(), deadline,
                 overdue, overdue ? overrideReason : null, now));
         domainEvents.record("BookingCancelled", "CANCELLATION", cancellation.getId(), 0, now,
-                List.of(bookingRequest.getRequestedByUserId()), Map.of(
+                trustedRecipients(bookingRequest.getRequestedByUserId(), reservation.getOrganizerUserId(),
+                        authorization.actorUserId()), Map.of(
                         "cancelledByUserId", authorization.actorUserId().toString(),
                         "reasonCode", request.reasonCode().name(),
                         "reservationId", reservation.getId().toString()));
         return response(cancellation);
+    }
+
+    private static List<UUID> trustedRecipients(UUID... recipients) {
+        List<UUID> unique = new ArrayList<>();
+        Set<UUID> seen = new HashSet<>();
+        for (UUID recipient : recipients) {
+            if (recipient != null && seen.add(recipient)) {
+                unique.add(recipient);
+            }
+        }
+        return List.copyOf(unique);
     }
 
     private static void validate(UUID resourceId, CancellationRequest request) {

@@ -35,8 +35,12 @@ import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -141,11 +145,13 @@ public class BookingExtensionService {
                 requestedEnd, null, PENDING, null, null, idempotencyKey, clock.instant(), null);
         try {
             BookingExtension saved = extensions.saveAndFlush(extension);
-            domainEvents.record("ExtensionRequested", "BOOKING_EXTENSION", saved.getId(), 0,
-                    saved.getRequestedAt(), List.of(saved.getRequestedByUserId()), Map.of(
-                            "requesterUserId", saved.getRequestedByUserId().toString(),
-                            "reservationId", reservation.getId().toString(),
-                            "requestedEndAt", saved.getRequestedEndAt().toString()));
+            Map<String, Object> facts = new LinkedHashMap<>();
+            facts.put("requesterUserId", saved.getRequestedByUserId().toString());
+            facts.put("reservationId", reservation.getId().toString());
+            facts.put("requestedEndAt", saved.getRequestedEndAt().toString());
+            facts.put("notificationRoute", "SCOPED_ADMIN_REQUEST");
+            domainEvents.record(2, "ExtensionRequested", "BOOKING_EXTENSION", saved.getId(), 0,
+                    saved.getRequestedAt(), List.of(), facts);
             return response(saved);
         } catch (DataIntegrityViolationException exception) {
             if (hasConstraint(exception, EXTENSION_KEY_CONSTRAINT)) {
@@ -265,12 +271,27 @@ public class BookingExtensionService {
     }
 
     private void recordDecisionEvent(BookingExtension extension, UUID actor) {
+        Map<String, Object> facts = new LinkedHashMap<>();
+        facts.put("requesterUserId", extension.getRequestedByUserId().toString());
+        facts.put("decidedByUserId", actor.toString());
+        facts.put("reservationId", extension.getReservation().getId().toString());
+        facts.put("decision", extension.getStatus().name());
+        if (extension.getDecisionComment() != null) {
+            facts.put("decisionComment", extension.getDecisionComment());
+        }
         domainEvents.record("ExtensionDecided", "BOOKING_EXTENSION", extension.getId(), 0,
-                extension.getDecidedAt(), List.of(extension.getRequestedByUserId()), Map.of(
-                        "requesterUserId", extension.getRequestedByUserId().toString(),
-                        "decidedByUserId", actor.toString(),
-                        "reservationId", extension.getReservation().getId().toString(),
-                        "decision", extension.getStatus().name()));
+                extension.getDecidedAt(), trustedRecipients(extension.getRequestedByUserId()), facts);
+    }
+
+    private static List<UUID> trustedRecipients(UUID... recipients) {
+        List<UUID> unique = new ArrayList<>();
+        Set<UUID> seen = new HashSet<>();
+        for (UUID recipient : recipients) {
+            if (recipient != null && seen.add(recipient)) {
+                unique.add(recipient);
+            }
+        }
+        return List.copyOf(unique);
     }
 
     private UUID authorizeRequester(Reservation reservation) {

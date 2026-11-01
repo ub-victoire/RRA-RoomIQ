@@ -79,11 +79,11 @@ class NotificationEventListenerRabbitPostgresTests {
     @Test
     void commitsEffectsBeforeAutoAcknowledgementAndDeduplicatesRedelivery() {
         UUID eventId = UUID.randomUUID();
-        String body = bookingRequested(eventId, 1);
+        String body = bookingRejected(eventId);
 
-        publish("booking.requested", body);
+        publish("booking.rejected", body);
         await(() -> count("notification_event_receipt") == 1 && count("notification") == 1);
-        publish("booking.requested", body);
+        publish("booking.rejected", body);
         await(() -> queueCount(NotificationEventMessagingConfiguration.QUEUE) == 0);
 
         assertThat(count("notification_event_receipt")).isEqualTo(1);
@@ -134,7 +134,7 @@ class NotificationEventListenerRabbitPostgresTests {
     @Test
     void malformedAndUnsupportedMessagesAreDeadLetteredWhileValidEventsContinue() {
         publish("booking.requested", "{malformed");
-        publish("booking.requested", bookingRequested(UUID.randomUUID(), 2));
+        publish("booking.requested", bookingRequested(UUID.randomUUID(), 3));
         UUID validEventId = UUID.randomUUID();
         publish("booking.requested", bookingRequested(validEventId, 1));
 
@@ -144,7 +144,7 @@ class NotificationEventListenerRabbitPostgresTests {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM notification_event_receipt WHERE event_id = ?",
                 Integer.class, validEventId)).isEqualTo(1);
-        assertThat(count("notification")).isEqualTo(1);
+        assertThat(count("notification")).isZero();
         assertThat(queueCount(NotificationEventMessagingConfiguration.DEAD_LETTER_QUEUE)).isEqualTo(2);
     }
 
@@ -168,7 +168,7 @@ class NotificationEventListenerRabbitPostgresTests {
                 """);
         UUID eventId = UUID.randomUUID();
 
-        publish("booking.requested", bookingRequested(eventId, 1));
+        publish("booking.rejected", bookingRejected(eventId));
         await(() -> count("notification_event_receipt") == 1 && count("notification") == 1);
 
         assertThat(count("notification_event_receipt")).isEqualTo(1);
@@ -203,6 +203,30 @@ class NotificationEventListenerRabbitPostgresTests {
                   }
                 }
                 """.formatted(eventId, version, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+    }
+
+    private String bookingRejected(UUID eventId) {
+        return """
+                {
+                  "eventId": "%s",
+                  "sourceService": "booking-service",
+                  "eventType": "BookingRejected",
+                  "eventVersion": 1,
+                  "aggregateType": "BOOKING_REQUEST",
+                  "aggregateId": "%s",
+                  "aggregateVersion": 1,
+                  "correlationId": "correlation-rabbit",
+                  "causationId": "causation-rabbit",
+                  "occurredAt": "2026-10-12T12:00:00Z",
+                  "payload": {
+                    "recipientUserIds": ["%s"],
+                    "requesterUserId": "%s",
+                    "decidedByUserId": "%s",
+                    "decision": "REJECTED"
+                  }
+                }
+                """.formatted(eventId, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID());
     }
 
     private String roomStatusChanged(UUID eventId) {

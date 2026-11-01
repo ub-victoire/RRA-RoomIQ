@@ -301,6 +301,41 @@ class IdentityAuthorizationTests {
                 .andExpect(status().isOk());
     }
 
+    @Test
+    void notificationRoutingRequiresAnActiveAuthorizedSecretaryAndCurrentIdentityScope() {
+        UUID buildingId = UUID.randomUUID();
+        UUID departmentId = UUID.randomUUID();
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        Role secretaryRole = roles.findByCodeIgnoreCase("SECRETARY")
+                .orElseGet(() -> roles.saveAndFlush(new Role("SECRETARY", "Secretary", true)));
+        for (String code : List.of("BOOKING_REQUEST_CREATE", "BOOKING_EXTENSION_REQUEST")) {
+            Permission permission = permissions.findByCodeIgnoreCase(code)
+                    .orElseGet(() -> permissions.saveAndFlush(new Permission(code, code)));
+            if (!rolePermissions.existsByRoleIdAndPermissionId(secretaryRole.getId(), permission.getId())) {
+                rolePermissions.saveAndFlush(new RolePermission(secretaryRole, permission));
+            }
+        }
+        AppUser secretary = createUser("notification-secretary-" + suffix + "@rra.rw", buildingId);
+        secretary.updateProfile(null, null, null, null, null, departmentId, buildingId);
+        secretary = users.saveAndFlush(secretary);
+        userRoles.saveAndFlush(new UserRole(secretary, secretaryRole, buildingId, null));
+
+        assertThat(policy.authorizedNotificationBookingRequestBuilding(
+                secretary.getId(), departmentId, false)).isEqualTo(buildingId);
+        assertThat(policy.authorizedNotificationBookingRequestBuilding(
+                secretary.getId(), UUID.randomUUID(), false)).isNull();
+        assertThat(policy.authorizedNotificationBookingRequestBuilding(
+                secretary.getId(), departmentId, true)).isNull();
+        assertThat(policy.authorizedNotificationExtensionRequestBuilding(secretary.getId()))
+                .isEqualTo(buildingId);
+
+        secretary.updateStatus(UserStatus.DISABLED);
+        secretary = users.saveAndFlush(secretary);
+        assertThat(policy.authorizedNotificationBookingRequestBuilding(
+                secretary.getId(), departmentId, false)).isNull();
+        assertThat(policy.authorizedNotificationExtensionRequestBuilding(secretary.getId())).isNull();
+    }
+
     private AppUser createUser(String email, UUID buildingId) {
         AppUser user = new AppUser(email, "Authorization test", UserStatus.ACTIVE);
         user.replacePasswordHash(passwordEncoder.encode("Good-password-9"));

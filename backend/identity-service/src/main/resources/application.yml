@@ -45,6 +45,13 @@ roomiq:
     jwt-secret: ${JWT_SECRET:}
     access-token-ttl: ${ACCESS_TOKEN_TTL:PT15M}
     refresh-token-ttl: ${REFRESH_TOKEN_TTL:P7D}
+    service-token:
+      issuer: ${ROOMIQ_SERVICE_TOKEN_ISSUER:}
+      notification-audience: ${IDENTITY_NOTIFICATION_RECIPIENT_AUDIENCE:rra-roomiq-identity-recipient-resolution}
+      notification-current-key-id: ${IDENTITY_NOTIFICATION_SERVICE_CURRENT_KEY_ID:}
+      notification-current-public-key-location: ${IDENTITY_NOTIFICATION_SERVICE_CURRENT_PUBLIC_KEY_LOCATION:}
+      notification-previous-key-id: ${IDENTITY_NOTIFICATION_SERVICE_PREVIOUS_KEY_ID:}
+      notification-previous-public-key-location: ${IDENTITY_NOTIFICATION_SERVICE_PREVIOUS_PUBLIC_KEY_LOCATION:}
 
 management:
   endpoints:

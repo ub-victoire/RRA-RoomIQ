@@ -30,11 +30,41 @@ class NotificationEventCodecTests {
         assertThatThrownBy(() -> codec.decode("{".getBytes(StandardCharsets.UTF_8)))
                 .isInstanceOf(InvalidNotificationEventException.class);
 
-        String unsupported = eventJson("BookingRequested", 2, "booking-service",
+        String unsupported = eventJson("BookingRequested", 3, "booking-service",
                 "BOOKING_REQUEST", "[]", "\"requesterUserId\":\"" + UUID.randomUUID() + "\"");
         assertThatThrownBy(() -> codec.decode(unsupported.getBytes(StandardCharsets.UTF_8)))
                 .isInstanceOf(InvalidNotificationEventException.class)
                 .hasMessage("Unsupported notification event version");
+    }
+
+    @Test
+    void acceptsOnlyExplicitVersionTwoRequestRoutingFacts() {
+        UUID requesterId = UUID.randomUUID();
+        String scopedRequest = eventJson("BookingRequested", 2, "booking-service",
+                "BOOKING_REQUEST", "[]", "\"requesterUserId\":\"" + requesterId + "\","
+                        + "\"departmentId\":\"" + UUID.randomUUID() + "\","
+                        + "\"vipRoom\":false,\"notificationRoute\":\"SCOPED_ADMIN_REQUEST\"");
+        String directRequest = eventJson("BookingRequested", 2, "booking-service",
+                "BOOKING_REQUEST", "[]", "\"requesterUserId\":\"" + requesterId + "\","
+                        + "\"departmentId\":\"" + UUID.randomUUID() + "\","
+                        + "\"vipRoom\":false,\"notificationRoute\":\"NONE\"");
+        String invalidRoute = scopedRequest.replace("SCOPED_ADMIN_REQUEST", "EVENT_RECIPIENTS");
+
+        assertThat(codec.decode(scopedRequest.getBytes(StandardCharsets.UTF_8)).eventVersion()).isEqualTo(2);
+        assertThat(codec.decode(directRequest.getBytes(StandardCharsets.UTF_8)).payload()
+                .get("notificationRoute").asText()).isEqualTo("NONE");
+        assertInvalid(invalidRoute);
+    }
+
+    @Test
+    void acceptsVersionTwoExtensionRequestOnlyWithScopedAdminRoute() {
+        String valid = eventJson("ExtensionRequested", 2, "booking-service",
+                "BOOKING_EXTENSION", "[]", "\"requesterUserId\":\"" + UUID.randomUUID() + "\","
+                        + "\"notificationRoute\":\"SCOPED_ADMIN_REQUEST\"");
+        String invalid = valid.replace("SCOPED_ADMIN_REQUEST", "NONE");
+
+        assertThat(codec.decode(valid.getBytes(StandardCharsets.UTF_8)).eventVersion()).isEqualTo(2);
+        assertInvalid(invalid);
     }
 
     @Test

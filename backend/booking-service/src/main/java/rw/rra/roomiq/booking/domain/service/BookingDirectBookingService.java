@@ -27,7 +27,10 @@ import rw.rra.roomiq.common.web.DomainException;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.List;
 import java.util.Map;
@@ -153,9 +156,12 @@ public class BookingDirectBookingService {
             throw exception;
         }
 
-        domainEvents.record("BookingRequested", "BOOKING_REQUEST", bookingRequest.getId(),
-                bookingRequest.getVersion(), now, List.of(bookingRequest.getRequestedByUserId()), Map.of(
+        domainEvents.record(2, "BookingRequested", "BOOKING_REQUEST", bookingRequest.getId(),
+                bookingRequest.getVersion(), now, List.of(), Map.of(
                         "requesterUserId", bookingRequest.getRequestedByUserId().toString(),
+                        "departmentId", bookingRequest.getDepartmentId().toString(),
+                        "vipRoom", references.vipRoom(),
+                        "notificationRoute", "NONE",
                         "roomId", bookingRequest.getRoomId().toString(),
                         "requestReference", bookingRequest.getRequestReference()));
 
@@ -187,6 +193,17 @@ public class BookingDirectBookingService {
                     "A confirmed direct booking has no persisted occurrence intervals");
         }
         return response(request, reservation.getId(), meeting.getId(), occurrenceCount);
+    }
+
+    private static List<UUID> trustedRecipients(UUID... recipients) {
+        List<UUID> unique = new ArrayList<>();
+        Set<UUID> seen = new HashSet<>();
+        for (UUID recipient : recipients) {
+            if (recipient != null && seen.add(recipient)) {
+                unique.add(recipient);
+            }
+        }
+        return List.copyOf(unique);
     }
 
     private static DirectBookingResponse response(BookingRequest request, UUID reservationId,

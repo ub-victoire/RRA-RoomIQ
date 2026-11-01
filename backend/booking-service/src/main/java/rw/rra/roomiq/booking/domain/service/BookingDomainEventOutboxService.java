@@ -43,7 +43,16 @@ public class BookingDomainEventOutboxService {
     @Transactional(propagation = Propagation.MANDATORY)
     public UUID record(String eventType, String aggregateType, UUID aggregateId, long aggregateVersion,
                        Instant occurredAt, List<UUID> recipients, Map<String, Object> facts) {
-        if (eventType == null || aggregateType == null || aggregateId == null || aggregateVersion < 0
+        return record(EVENT_VERSION, eventType, aggregateType, aggregateId, aggregateVersion, occurredAt,
+                recipients, facts);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public UUID record(int eventVersion, String eventType, String aggregateType, UUID aggregateId,
+                       long aggregateVersion, Instant occurredAt, List<UUID> recipients,
+                       Map<String, Object> facts) {
+        if (eventVersion < 1 || eventType == null || aggregateType == null || aggregateId == null
+                || aggregateVersion < 0
                 || occurredAt == null || recipients == null || recipients.stream().anyMatch(java.util.Objects::isNull)
                 || facts == null) {
             throw new IllegalArgumentException("Booking domain events require complete aggregate and recipient facts");
@@ -52,7 +61,7 @@ public class BookingDomainEventOutboxService {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("recipientUserIds", recipients.stream().map(UUID::toString).distinct().toList());
         payload.putAll(facts);
-        BookingDomainEvent event = new BookingDomainEvent(eventId, SOURCE_SERVICE, eventType, EVENT_VERSION,
+        BookingDomainEvent event = new BookingDomainEvent(eventId, SOURCE_SERVICE, eventType, eventVersion,
                 aggregateType, aggregateId, aggregateVersion, MDC.get(CorrelationIdFilter.MDC_KEY),
                 null, occurredAt, payload);
         String serialized;
@@ -69,7 +78,7 @@ public class BookingDomainEventOutboxService {
         } catch (SQLException exception) {
             throw new IllegalStateException("Could not map Booking domain event to PostgreSQL JSONB", exception);
         }
-        repository.save(new BookingEventOutboxEntry(eventId, eventType, EVENT_VERSION, aggregateType,
+        repository.save(new BookingEventOutboxEntry(eventId, eventType, eventVersion, aggregateType,
                 aggregateId, aggregateVersion, jsonb, occurredAt, clock.instant()));
         return eventId;
     }

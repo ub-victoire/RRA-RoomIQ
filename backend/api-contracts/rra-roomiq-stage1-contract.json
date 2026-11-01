@@ -1038,7 +1038,7 @@
       ],
       "requirementStatuses": {
         "S7-01": "complete",
-        "S7-02": "proposed",
+        "S7-02": "complete",
         "S7-03": "proposed",
         "S7-04": "proposed",
         "S7-05": "proposed",
@@ -1073,7 +1073,7 @@
         "Versioned event payload contracts and trustworthy recipient/contact resolution for event families not yet produced",
         "RRA-approved numeric throughput and latency SLOs"
       ],
-      "currentImplementation": "Notification Service has a v1 RabbitMQ consumer with durable main/dead-letter queues, bounded retries, strict envelope/event validation, and transactional PostgreSQL event receipts plus in-app notification effects. Booking transactionally emits request, approval/rejection, cancellation, extension, meeting-completion, explicit reservation-release, and per-occurrence Reminder events through its existing outbox. Each confirmed occurrence schedules organizer reminders 15 and 5 minutes before its Scheduling-validated start, using the validated IANA timezone. Notification persists SCHEDULED reminder rows, uses a reservation-scoped advisory lock and durable terminal-event receipts before making due rows PENDING, and cancels future or unread reminders on cancellation/completion/release. Reminder replay is deduplicated by event receipt and the approved schedule uniqueness index. The protected POST /api/v1/reservations/{reservationId}/release operation permits only CONFIRMED or IN_PROGRESS to transition to RELEASED, deactivates every occurrence's occupancy, and emits MeetingReleased atomically; it uses the existing Identity lifecycle authorization and notifies the organizer plus internal meeting participants. Room transactionally emits status and maintenance events through the user-approved ROOM_EVENT_OUTBOX and resolves affected recipients through Booking's protected v1 lookup, authorized by Identity ROOM_MANAGE scope. Production publisher authorization remains an unverified deployment setting. No Notification API route or Gateway route has been added.",
+      "currentImplementation": "Notification Service consumes versioned RabbitMQ events using durable receipts, bounded retries, and a durable dead-letter path. Booking request events use version 2 routing facts: Secretary requests and extension requests request scoped Admin resolution, while direct bookings explicitly use NONE; legacy request events do not guess an audience. Notification calls Identity's hidden POST /api/v1/internal/notifications/recipient-resolution endpoint using a separate short-lived RS256 service JWT. Identity validates the token and current active Secretary permissions, derives the building from Identity-owned user data, and returns active scoped Admin identifiers only. Decision notices route to the persisted requester and preserve applicable decision comments. Cancellation and Room conflict/maintenance notices use service-owned recipient identifiers and no caller/event email or display-name overrides. Reminders remain organizer-only. MeetingCompleted, MeetingReleased, and AutomaticReleaseOrNoShow persist idempotent receipts but create no notification rows until recipient configuration is separately approved; terminal processing still suppresses outstanding reminders. Event correlation IDs are forwarded to Identity as X-Correlation-ID, and durable receipts preserve correlation and causation. Notification does not access another service database, and no Notification route is Gateway-exposed. No ERD or Flyway migration change was made for S7-02.",
       "verification": {
         "bookingFocused": "50 tests passed; zero failures, errors, or skips",
         "roomFocused": "35 tests passed; zero failures, errors, or skips",
@@ -1082,6 +1082,30 @@
         "commonWeb": "6 tests passed; zero failures, errors, or skips",
         "fullBackendReactor": "11 modules, 61 test suites, and 354 tests passed; zero failures, errors, or skips",
         "acceptance": "S7-01 implementation and repository verification are complete. Production publisher credentials and routing-key ACLs remain an external deployment task and were not verified by these tests."
+      },
+      "s7-02Verification": {
+        "focusedNotificationCommand": "cd backend && mvn -pl notification-service -am -Dtest=NotificationIdentityRecipientClientTests,NotificationEventProcessingPostgresTests,NotificationEventProcessingRoutingTests -Dsurefire.failIfNoSpecifiedTests=false test",
+        "focusedNotification": "20 tests passed; zero failures, errors, or skips",
+        "notificationSuiteCommand": "cd backend && mvn -pl notification-service -am test",
+        "notificationSuite": "39 Notification Service tests passed; zero failures, errors, or skips",
+        "identityCommand": "cd backend && mvn -pl identity-service -am test",
+        "identityService": "62 Identity Service tests passed; zero failures, errors, or skips",
+        "commonWebCommand": "cd backend && mvn -pl common-web test",
+        "commonWeb": "6 tests passed; zero failures, errors, or skips",
+        "bookingFocusedCommand": "cd backend && mvn -pl booking-service -am -Dtest=BookingDirectBookingServiceTests -Dsurefire.failIfNoSpecifiedTests=false test",
+        "bookingFocused": "5 tests passed; zero failures, errors, or skips",
+        "fullReactorCommand": "cd backend && mvn test",
+        "fullBackendReactor": "10 Maven modules and 379 tests passed; zero failures, errors, or skips",
+        "acceptance": "S7-02 routing implementation and repository verification are complete. Production broker credentials and routing-key ACLs remain deployment verification and were not tested by this repository suite. S7-03 remains proposed."
+      },
+      "approvedRoutingDecisions": {
+        "requestAndExtensionRequests": "Version-2 Booking event route facts distinguish Secretary requests (SCOPED_ADMIN_REQUEST) from direct bookings (NONE); Identity resolves active Admin identifiers in the current Identity-derived building scope.",
+        "decisions": "Approval, rejection, and extension decisions use Booking's persisted requester identifier and include the applicable decision comment.",
+        "reminders": "Organizer-only, as previously approved.",
+        "meetingCompletionAndRelease": "Receipt-only; suppress all notification rows until an explicitly approved recipient configuration defines and enables them.",
+        "automaticReleaseAndNoShow": "Receipt-only; suppress all notification rows until a separately approved recipient policy exists.",
+        "serviceAuthentication": "Notification-to-Identity recipient resolution uses externally mounted RS256 keys, notification-service subject, configured issuer/audience, a UUID jti, a maximum two-minute lifetime, and the notification:recipient-resolution permission.",
+        "schema": "No ERD or Flyway migration change was required or made."
       },
       "eventContract": {
         "exchange": "roomiq.events.v1",
@@ -1113,7 +1137,7 @@
             "correlationId",
             "causationId"
           ],
-          "constraints": "eventId and aggregateId are UUIDs; eventVersion is exactly 1; aggregateVersion is a non-negative integer; occurredAt is an ISO-8601 instant; payload contains a unique recipientUserIds array of UUIDs and the event family's required facts; payload must not contain email or display-name overrides."
+          "constraints": "eventId and aggregateId are UUIDs; eventVersion is 1 except BookingRequested and ExtensionRequested may also use version 2; aggregateVersion is a non-negative integer; occurredAt is an ISO-8601 instant; payload contains a unique recipientUserIds array of UUIDs and the event family's required facts; payload must not contain email or display-name overrides. For request version 2, the recipient list is ignored and explicit routing facts control recipient resolution."
         },
         "events": [
           {
@@ -1121,9 +1145,19 @@
             "sourceService": "booking-service",
             "routingKey": "booking.requested",
             "aggregateType": "BOOKING_REQUEST",
+            "supportedVersions": [
+              1,
+              2
+            ],
             "requiredPayloadFacts": [
               "requesterUserId"
-            ]
+            ],
+            "version2Facts": [
+              "departmentId",
+              "vipRoom",
+              "notificationRoute"
+            ],
+            "recipientPolicy": "Version 2 SCOPED_ADMIN_REQUEST calls Identity for active Admin IDs in the requester's current Identity-derived building scope; version 2 NONE and legacy version 1 create a receipt without guessed recipients."
           },
           {
             "eventType": "BookingApproved",
@@ -1133,7 +1167,11 @@
             "requiredPayloadFacts": [
               "requesterUserId",
               "decidedByUserId"
-            ]
+            ],
+            "optionalPayloadFacts": [
+              "decisionComment"
+            ],
+            "recipientPolicy": "Only the Booking-persisted requester/Secretary receives the decision notice."
           },
           {
             "eventType": "BookingRejected",
@@ -1143,7 +1181,11 @@
             "requiredPayloadFacts": [
               "requesterUserId",
               "decidedByUserId"
-            ]
+            ],
+            "optionalPayloadFacts": [
+              "decisionComment"
+            ],
+            "recipientPolicy": "Only the Booking-persisted requester/Secretary receives the decision notice."
           },
           {
             "eventType": "BookingCancelled",
@@ -1162,7 +1204,15 @@
             "aggregateType": "BOOKING_EXTENSION",
             "requiredPayloadFacts": [
               "requesterUserId"
-            ]
+            ],
+            "supportedVersions": [
+              1,
+              2
+            ],
+            "version2Facts": [
+              "notificationRoute"
+            ],
+            "recipientPolicy": "Version 2 SCOPED_ADMIN_REQUEST calls Identity for active Admin IDs in the requester's current Identity-derived building scope; legacy version 1 creates a receipt without guessed recipients."
           },
           {
             "eventType": "ExtensionDecided",
@@ -1173,7 +1223,11 @@
               "requesterUserId",
               "decidedByUserId",
               "decision"
-            ]
+            ],
+            "optionalPayloadFacts": [
+              "decisionComment"
+            ],
+            "recipientPolicy": "Only the Booking-persisted requester/Secretary receives the decision notice."
           },
           {
             "eventType": "RoomStatusChanged",
@@ -1183,7 +1237,8 @@
             "requiredPayloadFacts": [
               "roomId",
               "status"
-            ]
+            ],
+            "recipientPolicy": "Affected active users are supplied as service-owned Booking/Room identifiers; payload display-name and email overrides are forbidden."
           },
           {
             "eventType": "RoomMaintenanceChanged",
@@ -1200,7 +1255,8 @@
             "timestampFacts": [
               "periodStart",
               "periodEnd"
-            ]
+            ],
+            "recipientPolicy": "Affected active users are supplied as service-owned Booking/Room identifiers; payload display-name and email overrides are forbidden."
           },
           {
             "eventType": "MeetingCompleted",
@@ -1209,8 +1265,10 @@
             "aggregateType": "MEETING",
             "requiredPayloadFacts": [
               "meetingId",
-              "completedAt"
-            ]
+              "completedAt",
+              "reservationId"
+            ],
+            "recipientPolicy": "Receipt-only; no notification rows until an explicitly approved recipient configuration enables and defines the audience."
           },
           {
             "eventType": "MeetingReleased",
@@ -1223,7 +1281,8 @@
               "releasedByUserId",
               "reservationId"
             ],
-            "trigger": "Only the explicit protected POST /api/v1/reservations/{reservationId}/release operation emits this event. It atomically transitions an active reservation to RELEASED and deactivates its occurrence occupancy; completion and cancellation emit their own events."
+            "trigger": "Only the explicit protected POST /api/v1/reservations/{reservationId}/release operation emits this event. It atomically transitions an active reservation to RELEASED and deactivates its occurrence occupancy; completion and cancellation emit their own events.",
+            "recipientPolicy": "Receipt-only; no notification rows until an explicitly approved recipient configuration enables and defines the audience. Terminal processing still suppresses outstanding reminders."
           },
           {
             "eventType": "Reminder",
@@ -1238,7 +1297,8 @@
               "reminderAt",
               "reminderOffsetMinutes"
             ],
-            "trigger": "Booking confirmation writes 15- and 5-minute reminder events for every validated reservation occurrence in the same source transaction as the reservation and meeting."
+            "trigger": "Booking confirmation writes 15- and 5-minute reminder events for every validated reservation occurrence in the same source transaction as the reservation and meeting.",
+            "recipientPolicy": "Organizer-only, using the trusted Booking organizer identifier."
           },
           {
             "eventType": "AutomaticReleaseOrNoShow",
@@ -1248,12 +1308,30 @@
             "requiredPayloadFacts": [
               "reservationId",
               "reasonCode"
-            ]
+            ],
+            "recipientPolicy": "Receipt-only; no notification rows until a separately approved recipient policy exists."
           }
         ],
         "sourceIdentity": "The consumer verifies the allowlisted sourceService/eventType pairing and the delivered routing key. Deployed RabbitMQ topic permissions must use distinct publisher credentials and permit each source to publish only its owned routing keys; body sourceService is not, by itself, authentication.",
         "sourceCommitRule": "Business producers must publish from a transactional outbox after the owning transaction commits. Notification Service cannot independently prove a source database commit.",
-        "producerCoverage": "Booking emits BookingRequested, BookingApproved, BookingRejected, BookingCancelled, ExtensionRequested, ExtensionDecided, MeetingCompleted, MeetingReleased (only on explicit reservation release), and per-occurrence 15-/5-minute Reminder events via its transactionally written outbox. Reminder events carry trusted organizer recipient UUIDs, authoritative start/reminder instants, and the validated building IANA timezone. Room emits RoomStatusChanged and RoomMaintenanceChanged via ROOM_EVENT_OUTBOX. Production RabbitMQ publisher credentials and per-routing-key ACLs remain deployment requirements.",
+        "identityRecipientResolution": {
+          "method": "POST",
+          "path": "/api/v1/internal/notifications/recipient-resolution",
+          "visibility": "Hidden from public OpenAPI; not exposed through the API Gateway.",
+          "authentication": "X-RoomIQ-Service-Authorization uses a short-lived RS256 service JWT separate from delegated user JWTs.",
+          "tokenRequirements": {
+            "subject": "notification-service",
+            "issuer": "ROOMIQ_SERVICE_TOKEN_ISSUER",
+            "audience": "rra-roomiq-identity-recipient-resolution",
+            "permission": "notification:recipient-resolution",
+            "keySelection": "kid selects the configured current or optional previous Identity public key",
+            "maximumLifetime": "PT2M",
+            "identifier": "UUID jti"
+          },
+          "authorization": "Identity validates Booking event v2 context and current active Secretary role/permission, derives office-building scope from Identity-owned user profile data, and returns only active Admin user UUIDs assigned to that building. Caller-supplied building scope, recipient list, display name, and email are not accepted.",
+          "failureBehavior": "Missing/malformed credentials and invalid context fail closed; Identity outages prevent Notification persistence so the durable event is retried and eventually dead-lettered under the configured policy."
+        },
+        "producerCoverage": "Booking emits BookingRequested v2 and ExtensionRequested v2 routing facts through its existing outbox; decisions include requester identifiers and an optional persisted decision comment. Booking also emits cancellation, completion, explicit release, and per-occurrence 15-/5-minute Reminder events. Reminder events carry the trusted organizer recipient UUID, authoritative start/reminder instants, and validated building IANA timezone. Room emits RoomStatusChanged and RoomMaintenanceChanged via ROOM_EVENT_OUTBOX. Completion, release, and automatic-release/no-show event receipts are durable but Notification creates no recipient notice rows until their policies are explicitly approved. Production RabbitMQ publisher credentials and per-routing-key ACLs remain deployment requirements.",
         "roomEventRecipientLookup": {
           "method": "POST",
           "path": "/api/v1/internal/notifications/room-event-recipients",

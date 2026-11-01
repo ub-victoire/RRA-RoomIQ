@@ -21,8 +21,12 @@ import rw.rra.roomiq.common.web.DomainException;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static rw.rra.roomiq.booking.domain.enums.ApprovalDecisionType.APPROVED;
@@ -119,10 +123,16 @@ public class BookingDecisionService {
         try {
             decisions.saveAndFlush(decision);
             bookingRequests.saveAndFlush(bookingRequest);
+            Map<String, Object> facts = new LinkedHashMap<>();
+            facts.put("requesterUserId", bookingRequest.getRequestedByUserId().toString());
+            facts.put("decidedByUserId", actor.toString());
+            facts.put("decision", REJECTED.name());
+            if (decision.getComment() != null) {
+                facts.put("decisionComment", decision.getComment());
+            }
             domainEvents.record("BookingRejected", "BOOKING_REQUEST", bookingRequest.getId(),
-                    bookingRequest.getVersion(), decidedAt, List.of(bookingRequest.getRequestedByUserId()),
-                    Map.of("requesterUserId", bookingRequest.getRequestedByUserId().toString(),
-                            "decidedByUserId", actor.toString(), "decision", REJECTED.name()));
+                    bookingRequest.getVersion(), decidedAt, trustedRecipients(bookingRequest.getRequestedByUserId()),
+                    facts);
         } catch (DataIntegrityViolationException exception) {
             if (hasConstraint(exception, UNIQUE_DECISION_CONSTRAINT)) {
                 throw decisionConflict();
@@ -140,11 +150,18 @@ public class BookingDecisionService {
         try {
             decisions.saveAndFlush(decision);
             confirmed = confirmationService.confirm(bookingRequest, authorization, decidedAt);
+            Map<String, Object> facts = new LinkedHashMap<>();
+            facts.put("requesterUserId", bookingRequest.getRequestedByUserId().toString());
+            facts.put("decidedByUserId", actor.toString());
+            facts.put("reservationId", confirmed.reservation().getId().toString());
+            facts.put("meetingId", confirmed.meeting().getId().toString());
+            facts.put("decision", APPROVED.name());
+            if (decision.getComment() != null) {
+                facts.put("decisionComment", decision.getComment());
+            }
             domainEvents.record("BookingApproved", "BOOKING_REQUEST", bookingRequest.getId(),
-                    bookingRequest.getVersion(), decidedAt, List.of(bookingRequest.getRequestedByUserId()),
-                    Map.of("requesterUserId", bookingRequest.getRequestedByUserId().toString(),
-                            "decidedByUserId", actor.toString(), "reservationId", confirmed.reservation().getId().toString(),
-                            "meetingId", confirmed.meeting().getId().toString(), "decision", APPROVED.name()));
+                    bookingRequest.getVersion(), decidedAt, trustedRecipients(bookingRequest.getRequestedByUserId()),
+                    facts);
         } catch (DataIntegrityViolationException exception) {
             if (hasConstraint(exception, UNIQUE_DECISION_CONSTRAINT)
                     || hasConstraint(exception, UNIQUE_RESERVATION_CONSTRAINT)) {
@@ -156,6 +173,17 @@ public class BookingDecisionService {
         return new BookingDecisionResponse(bookingRequest.getId(), bookingRequest.getStatus(),
                 APPROVED, actor, decidedAt, decision.getComment(),
                 confirmed.reservation().getId(), confirmed.meeting().getId());
+    }
+
+    private static List<UUID> trustedRecipients(UUID... recipients) {
+        List<UUID> unique = new ArrayList<>();
+        Set<UUID> seen = new HashSet<>();
+        for (UUID recipient : recipients) {
+            if (recipient != null && seen.add(recipient)) {
+                unique.add(recipient);
+            }
+        }
+        return List.copyOf(unique);
     }
 
     private static boolean hasConstraint(DataIntegrityViolationException exception, String expectedName) {

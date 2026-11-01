@@ -79,7 +79,9 @@ public class NotificationEventCodec {
             }
 
             int eventVersion = requiredInteger(root, "eventVersion");
-            if (eventVersion != 1) {
+            if (eventVersion != 1
+                    && !(eventVersion == 2 && Set.of("BookingRequested", "ExtensionRequested")
+                    .contains(eventType))) {
                 throw new InvalidNotificationEventException("Unsupported notification event version");
             }
             String aggregateType = requiredText(root, "aggregateType", 64);
@@ -97,6 +99,9 @@ public class NotificationEventCodec {
             Instant occurredAt = requiredInstant(root, "occurredAt");
             JsonNode payload = root.get("payload");
             List<UUID> recipientUserIds = validatePayload(payload, definition);
+            if (eventVersion == 2) {
+                validateRequestRoutingFacts(eventType, payload);
+            }
             validateReminderFacts(eventType, payload);
             String resourceType = "Reminder".equals(eventType) || payload.has("reservationId")
                     ? "RESERVATION" : aggregateType;
@@ -116,6 +121,22 @@ public class NotificationEventCodec {
             throw new InvalidNotificationEventException("Unsupported notification event type");
         }
         return definition.routingKey();
+    }
+
+    private static void validateRequestRoutingFacts(String eventType, JsonNode payload) {
+        String notificationRoute = requiredText(payload, "notificationRoute", 64);
+        if ("BookingRequested".equals(eventType)) {
+            requiredPayloadUuid(payload, "departmentId");
+            JsonNode vipRoom = payload.get("vipRoom");
+            if (vipRoom == null || !vipRoom.isBoolean()
+                    || !Set.of("SCOPED_ADMIN_REQUEST", "NONE").contains(notificationRoute)) {
+                throw new InvalidNotificationEventException("Booking request notification routing facts are invalid");
+            }
+            return;
+        }
+        if (!"SCOPED_ADMIN_REQUEST".equals(notificationRoute)) {
+            throw new InvalidNotificationEventException("Extension request notification routing facts are invalid");
+        }
     }
 
     private static void validateEnvelopeShape(JsonNode root) {

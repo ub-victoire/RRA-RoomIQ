@@ -416,6 +416,28 @@ public class IdentityAuthorizationService {
                 vipRoom, Instant.now());
     }
 
+    public UUID authorizedNotificationBookingRequestBuilding(UUID requesterUserId, UUID departmentId,
+                                                              Boolean vipRoom) {
+        AppUser requester = activeSecretary(requesterUserId);
+        if (requester == null || departmentId == null || !departmentId.equals(requester.getDepartmentId())
+                || !authorization.hasPermissionAtBuilding(requesterUserId, BOOKING_REQUEST_CREATE,
+                requester.getOfficeBuildingId())
+                || Boolean.TRUE.equals(vipRoom)
+                && !hasActivePrivilege(requesterUserId, "CG_BOOKING", Instant.now())) {
+            return null;
+        }
+        return requester.getOfficeBuildingId();
+    }
+
+    public UUID authorizedNotificationExtensionRequestBuilding(UUID requesterUserId) {
+        AppUser requester = activeSecretary(requesterUserId);
+        if (requester == null || !authorization.hasPermissionAtBuilding(
+                requesterUserId, BOOKING_EXTENSION_REQUEST, requester.getOfficeBuildingId())) {
+            return null;
+        }
+        return requester.getOfficeBuildingId();
+    }
+
     public boolean canApproveBooking(Authentication authentication, UUID requesterUserId, UUID buildingId) {
         UUID actorId = actorId(authentication);
         if (actorId == null || !isActive(actorId) || actorId.equals(requesterUserId) || buildingId == null) {
@@ -637,6 +659,17 @@ public class IdentityAuthorizationService {
 
     private boolean isActive(UUID userId) {
         return users.findById(userId).map(user -> user.getStatus().name().equals("ACTIVE")).orElse(false);
+    }
+
+    private AppUser activeSecretary(UUID userId) {
+        AppUser user = users.findById(userId).orElse(null);
+        if (user == null || user.getStatus() != UserStatus.ACTIVE || user.getOfficeBuildingId() == null) {
+            return null;
+        }
+        boolean assignedSecretary = userRoles.findAllByUserIdAndScopeOfficeBuildingId(
+                        userId, user.getOfficeBuildingId()).stream()
+                .anyMatch(assignment -> assignment.getRole().getCode().equals("SECRETARY"));
+        return assignedSecretary ? user : null;
     }
 
     private boolean hasActivePrivilege(UUID userId, String privilegeCode, Instant at) {
