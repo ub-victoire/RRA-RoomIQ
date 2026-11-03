@@ -10,7 +10,7 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
-public interface AuditEventRepository extends Repository<AuditEvent, UUID> {
+public interface AuditEventRepository extends Repository<AuditEvent, UUID>, AuditEventSearchRepository {
     Optional<AuditEvent> findById(UUID id);
 
     long count();

@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import rw.rra.roomiq.identity.domain.dto.BookingAuthorizationRequest;
 import rw.rra.roomiq.identity.domain.dto.BookingAuthorizationResponse;
+import rw.rra.roomiq.identity.domain.dto.AuditSearchAuthorizationResponse;
 import rw.rra.roomiq.identity.domain.dto.OrganizationAuthorizationRequest;
 import rw.rra.roomiq.identity.domain.dto.MeetingAuthorizationRequest;
 import rw.rra.roomiq.identity.domain.dto.MeetingAuthorizationResponse;
@@ -162,6 +163,16 @@ public class OrganizationAuthorizationController {
             throw new AccessDeniedException("Notification-delivery management is denied");
         }
         return ResponseEntity.ok(new NotificationDeliveryAuthorizationResponse(actorUserId));
+    }
+
+    @PostMapping("/audit-search")
+    @Operation(summary = "Authorize audit search",
+            description = "Requires AUDIT_READ on an active global SUPER_ADMIN assignment or one or more active, building-scoped ADMIN assignments. The authenticated user and returned building scopes are derived from current Identity records.")
+    public ResponseEntity<AuditSearchAuthorizationResponse> authorizeAuditSearch(
+            Authentication authentication) {
+        return authorization.auditSearchAuthorization(authentication)
+                .map(ResponseEntity::ok)
+                .orElseThrow(() -> new AccessDeniedException("Audit search access is denied"));
     }
 
     @PostMapping("/scheduling")

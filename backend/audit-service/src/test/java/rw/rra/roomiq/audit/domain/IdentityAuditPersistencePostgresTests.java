@@ -24,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @SpringBootTest(properties = {
         "spring.flyway.enabled=true",
         "spring.jpa.hibernate.ddl-auto=validate",
+        "roomiq.auth.jwt-secret=test-only-signing-key-at-least-32-bytes-long",
         "roomiq.audit.notification.events.enabled=false",
         "roomiq.audit.identity.events.enabled=false"
 })
@@ -141,6 +142,9 @@ class IdentityAuditPersistencePostgresTests {
         assertRejectedSqlState("42501", () -> jdbcTemplate.update(
                 "DELETE FROM audit_event WHERE id = ?", eventId));
         assertRejectedSqlState("42501", () -> jdbcTemplate.execute("TRUNCATE TABLE audit_event"));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT has_function_privilege(current_user, 'public.audit_event_reject_mutation()', 'EXECUTE')",
+                Boolean.class)).isFalse();
 
         JdbcTemplate ownerJdbc = new JdbcTemplate(new DriverManagerDataSource(
                 postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword()));

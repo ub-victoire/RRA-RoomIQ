@@ -11,6 +11,7 @@ import org.springframework.boot.test.context.SpringBootTest;
         "spring.flyway.user=test-migrator",
         "spring.flyway.password=test-migrator-password",
         "spring.jpa.hibernate.ddl-auto=none",
+        "roomiq.auth.jwt-secret=test-only-signing-key-at-least-32-bytes-long",
         "roomiq.audit.notification.events.enabled=false",
         "roomiq.audit.identity.events.enabled=false"
 })

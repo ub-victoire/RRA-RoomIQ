@@ -25,6 +25,7 @@ public final class IdentityPermissionCodes {
     public static final String ROOM_MANAGE = "ROOM_MANAGE";
     public static final String NOTIFICATION_TEMPLATE_MANAGE = "NOTIFICATION_TEMPLATE_MANAGE";
     public static final String NOTIFICATION_DELIVERY_MANAGE = "NOTIFICATION_DELIVERY_MANAGE";
+    public static final String AUDIT_READ = "AUDIT_READ";
 
     private IdentityPermissionCodes() {
     }

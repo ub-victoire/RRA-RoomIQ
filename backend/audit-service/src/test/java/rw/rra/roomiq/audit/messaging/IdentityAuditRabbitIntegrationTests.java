@@ -26,6 +26,7 @@ import static org.awaitility.Awaitility.await;
 @SpringBootTest(properties = {
         "spring.flyway.enabled=true",
         "spring.jpa.hibernate.ddl-auto=validate",
+        "roomiq.auth.jwt-secret=test-only-signing-key-at-least-32-bytes-long",
         "roomiq.audit.notification.events.enabled=false",
         "roomiq.audit.identity.events.enabled=true",
         "spring.rabbitmq.listener.simple.retry.max-attempts=3",

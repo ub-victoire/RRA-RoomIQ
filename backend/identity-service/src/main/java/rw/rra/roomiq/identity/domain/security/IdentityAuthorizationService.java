@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 import rw.rra.roomiq.identity.domain.entity.AppUser;
 import rw.rra.roomiq.identity.domain.entity.Role;
 import rw.rra.roomiq.identity.domain.entity.UserStatus;
+import rw.rra.roomiq.identity.domain.dto.AuditSearchAuthorizationResponse;
 import rw.rra.roomiq.identity.domain.dto.MeetingAuthorizationRequest.Visibility;
 import rw.rra.roomiq.identity.domain.repository.AppUserRepository;
 import rw.rra.roomiq.identity.domain.repository.IdentityAuthorizationRepository;
@@ -17,6 +18,8 @@ import rw.rra.roomiq.identity.domain.repository.UserRoleRepository;
 
 import java.util.UUID;
 import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 
 import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.PRIVILEGE_GRANT;
 import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.PRIVILEGE_READ;
@@ -39,6 +42,7 @@ import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.BOO
 import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.ROOM_MANAGE;
 import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.NOTIFICATION_TEMPLATE_MANAGE;
 import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.NOTIFICATION_DELIVERY_MANAGE;
+import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.AUDIT_READ;
 
 @Service("identityAuthorization")
 @Transactional(readOnly = true)
@@ -669,6 +673,43 @@ public class IdentityAuthorizationService {
         UUID userId = actorId(authentication);
         return userId != null && authorization.isActiveSuperAdminWithPermission(userId,
                 UserStatus.ACTIVE, NOTIFICATION_DELIVERY_MANAGE);
+    }
+
+    public Optional<AuditSearchAuthorizationResponse> auditSearchAuthorization(
+            Authentication authentication) {
+        UUID userId = authenticatedJwtUserId(authentication);
+        if (userId == null) {
+            return Optional.empty();
+        }
+
+        if (authorization.isActiveSuperAdminWithPermission(userId, UserStatus.ACTIVE, AUDIT_READ)) {
+            return Optional.of(new AuditSearchAuthorizationResponse(userId,
+                    AuditSearchAuthorizationResponse.AccessScope.GLOBAL, List.of()));
+        }
+
+        List<UUID> buildingIds = authorization.findActiveAdminAuditBuildingScopes(
+                userId, UserStatus.ACTIVE, AUDIT_READ);
+        if (buildingIds.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(new AuditSearchAuthorizationResponse(userId,
+                AuditSearchAuthorizationResponse.AccessScope.BUILDING_SCOPED, buildingIds));
+    }
+
+    private UUID authenticatedJwtUserId(Authentication authentication) {
+        if (!(authentication instanceof JwtAuthenticationToken jwtAuthentication)
+                || !jwtAuthentication.isAuthenticated()) {
+            return null;
+        }
+        String subject = jwtAuthentication.getToken().getSubject();
+        if (subject == null) {
+            return null;
+        }
+        try {
+            return UUID.fromString(subject);
+        } catch (IllegalArgumentException exception) {
+            return null;
+        }
     }
 
     private boolean isActive(UUID userId) {

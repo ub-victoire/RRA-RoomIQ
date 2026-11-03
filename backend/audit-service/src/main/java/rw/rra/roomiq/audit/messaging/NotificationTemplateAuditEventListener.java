@@ -30,7 +30,7 @@ public class NotificationTemplateAuditEventListener {
         }
         var event = codec.decode(message.getBody());
         String messageId = message.getMessageProperties().getMessageId();
-        if (messageId != null && !Objects.equals(messageId, event.eventId().toString())) {
+        if (!Objects.equals(messageId, event.eventId().toString())) {
             throw new IllegalArgumentException("Notification audit message identifier does not match its event");
         }
         processor.process(event);

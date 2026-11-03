@@ -21,3 +21,4 @@ EXECUTE FUNCTION public.audit_event_reject_mutation();
 GRANT USAGE ON SCHEMA public TO roomiq_audit_app;
 REVOKE ALL PRIVILEGES ON TABLE public.audit_event FROM PUBLIC, roomiq_audit_app;
 GRANT SELECT, INSERT ON TABLE public.audit_event TO roomiq_audit_app;
+REVOKE ALL PRIVILEGES ON FUNCTION public.audit_event_reject_mutation() FROM PUBLIC, roomiq_audit_app;

@@ -4,6 +4,7 @@ import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -23,6 +24,7 @@ public class NotificationTemplateAuditEventCodec {
     private static final Set<String> AUDITABLE_FIELDS = Set.of(
             "code", "version", "channel", "subject", "bodyTemplate", "isActive");
     private static final Pattern CODE = Pattern.compile("[A-Za-z][A-Za-z0-9._-]{0,127}");
+    private static final Pattern CORRELATION_ID = Pattern.compile("[A-Za-z0-9._-]{1,128}");
 
     private final ObjectMapper objectMapper;
 
@@ -52,6 +54,9 @@ public class NotificationTemplateAuditEventCodec {
             UUID actorUserId = uuid(root, "actorUserId");
             UUID resourceId = uuid(root, "resourceId");
             String correlationId = optionalText(root, "correlationId", 128);
+            if (correlationId != null && !CORRELATION_ID.matcher(correlationId).matches()) {
+                throw invalid("Audit event correlation identifier is invalid");
+            }
             Instant timestamp;
             try {
                 timestamp = Instant.parse(text(root, "timestamp", 64));
@@ -61,9 +66,13 @@ public class NotificationTemplateAuditEventCodec {
 
             JsonNode metadata = root.get("metadata");
             validateMetadata(metadata);
+            ObjectNode storedMetadata = objectMapper.createObjectNode();
+            storedMetadata.put("sourceService", "notification-service");
+            storedMetadata.put("schemaVersion", schemaVersion);
+            storedMetadata.set("eventMetadata", metadata.deepCopy());
             return new NotificationTemplateAuditEvent(eventId, schemaVersion, eventType, timestamp,
-                    "notification-service", actorUserId, "NOTIFICATION_TEMPLATE", resourceId,
-                    correlationId, objectMapper.writeValueAsString(metadata));
+                    "notification-service", actorUserId, "NOTIFICATION_TEMPLATE", resourceId, correlationId,
+                    objectMapper.writeValueAsString(storedMetadata));
         } catch (JacksonException exception) {
             throw invalid("Audit event JSON is malformed");
         }

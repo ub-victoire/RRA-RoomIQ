@@ -44,4 +44,18 @@ public interface IdentityAuthorizationRepository extends Repository<UserRole, UU
     boolean isActiveSuperAdminWithPermission(@Param("userId") UUID userId,
                                              @Param("activeStatus") UserStatus activeStatus,
                                              @Param("permissionCode") String permissionCode);
+
+    @Query("select distinct assignment.scopeOfficeBuildingId " +
+            "from UserRole assignment, RolePermission rolePermission " +
+            "join rolePermission.permission permission " +
+            "where assignment.user.id = :userId " +
+            "and assignment.user.status = :activeStatus " +
+            "and assignment.role.id = rolePermission.role.id " +
+            "and assignment.role.code = 'ADMIN' " +
+            "and permission.code = :permissionCode " +
+            "and assignment.scopeOfficeBuildingId is not null " +
+            "order by assignment.scopeOfficeBuildingId")
+    List<UUID> findActiveAdminAuditBuildingScopes(@Param("userId") UUID userId,
+                                                  @Param("activeStatus") UserStatus activeStatus,
+                                                  @Param("permissionCode") String permissionCode);
 }

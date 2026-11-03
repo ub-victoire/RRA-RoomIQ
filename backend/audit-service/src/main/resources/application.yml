@@ -37,6 +37,12 @@ spring:
 server:
   port: ${AUDIT_SERVICE_PORT:8087}
 roomiq:
+  identity:
+    url: ${IDENTITY_SERVICE_URL:http://localhost:8081}
+    connect-timeout: ${AUDIT_IDENTITY_CONNECT_TIMEOUT:2s}
+    read-timeout: ${AUDIT_IDENTITY_READ_TIMEOUT:5s}
+  auth:
+    jwt-secret: ${JWT_SECRET:}
   audit:
     identity:
       events:

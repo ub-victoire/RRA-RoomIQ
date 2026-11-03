@@ -24,7 +24,7 @@ Templates are immutable versions unique by `(code, version, channel)`; a new ver
 
 For in-app processing, the implemented code convention is `template.code = event.eventType`. Bodies use `{{variableName}}` placeholders resolved only from the event's allowlisted safe display facts. Body substitutions are HTML-escaped, subject substitutions have newlines removed, and malformed, missing, or incompatible templates fail explicitly rather than using fallback content. Each code/channel has at most one active version: activation serializes on a PostgreSQL transaction advisory lock and switches versions atomically. S7-06 renders active EMAIL versions into durable delivery rows when a recipient's email preference is enabled.
 
-Create, activation, and deactivation persist a safe audit event to Notification's approved transactional `notification_audit_outbox` in the same transaction. The payload records only template code/version/channel and changed field names, never subject/body content. A scheduled relay sends persistent events on `audit.notification`, waits for broker confirmation and routing success, and retries failed sends with bounded exponential delay. Audit Service validates the event, deduplicates it in its own `AUDIT_EVENT` table, and dead-letters invalid or unsupported events. Neither service reads the other's database. The Notification template APIs are not exposed through the API Gateway.
+Create, activation, and deactivation persist a safe audit event to Notification's approved transactional `notification_audit_outbox` in the same transaction. The payload records only template code/version/channel and changed field names, never subject/body content. A scheduled relay sends persistent events on `audit.notification` with the broker message ID set to the event ID, waits for broker confirmation and routing success, and retries failed sends with bounded exponential delay. Audit Service requires the matching broker message ID, validates the event (including nullable correlation using the shared Identity format), retains source/schema version alongside the existing safe event metadata, deduplicates it in its own `AUDIT_EVENT` table, and dead-letters invalid or unsupported events. The original producer timestamp and trusted actor/resource facts are preserved; the template event has null building scope and `SUCCESS` outcome. Neither service reads the other's database. The Notification template APIs are not exposed through the API Gateway.
 
 ## S7-06 asynchronous email delivery
 
@@ -129,11 +129,13 @@ NOTIFICATION_RABBITMQ_USERNAME=replace-with-notification-account
 NOTIFICATION_RABBITMQ_PASSWORD=replace-with-local-secret
 # Audit Service consumes the audit.notification routing key using its own account.
 AUDIT_DB_URL=jdbc:postgresql://localhost:5432/roomiq_audit
-AUDIT_DB_USERNAME=roomiq
-AUDIT_DB_PASSWORD=replace-with-local-secret
+AUDIT_DB_USERNAME=roomiq_audit_app
+AUDIT_DB_PASSWORD=replace-with-audit-runtime-secret
 AUDIT_RABBITMQ_USERNAME=replace-with-audit-account
 AUDIT_RABBITMQ_PASSWORD=replace-with-local-secret
 ```
+
+Audit Service's separate Flyway migrator credentials are configured only in the Audit Service deployment; do not provide them to Notification Service.
 
 Provide RabbitMQ credentials with publish/consume access limited to the required exchanges and queues in deployed environments. The local `guest` default is for development only. Do not add credentials to tracked configuration files.
 
