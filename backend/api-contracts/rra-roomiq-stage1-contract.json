@@ -1702,8 +1702,8 @@
       "erdPolicy": "The user-approved durable event persistence consists of Booking's existing booking_event_outbox, NOTIFICATION_EVENT_RECEIPT, and ROOM_EVENT_OUTBOX as shown in the ERD and Room Flyway migration. No additional ERD or migration change is authorized without an exact proposal and explicit user approval."
   },
   "stage8Progress": {
-    "status": "s8-01-implemented-verified-awaiting-user-acceptance",
-    "implementationAuthorization": "S8-01 was explicitly authorized and completed as a documentation-only action catalog. S8-02 through S8-07 remain unauthorized; obtain explicit user approval for each item before implementation. S8-06 additionally requires formal RRA retention and archival/disposal policy approval.",
+    "status": "s8-05-complete-verified; s8-06-blocked-pending-rra-policy; s8-07-partially-verified-blocked-on-s8-06",
+    "implementationAuthorization": "S8-01 and S8-02 are accepted; S8-03 has been verified subject to production DBA provisioning; S8-04 is verified; S8-05 is complete and full-reactor verified; S8-06 remains blocked pending formal RRA approval of the retention, archival, legal-hold, and disposal policy; S8-07 is partially verified and blocked on the unresolved S8-06 prerequisite.",
     "implementationStarted": true,
     "checklist": "Documentation.md#stage-8-requirement-checklist-approved",
     "actionOwnerMatrix": "../docs/audit-action-owner-matrix.md",
@@ -1728,13 +1728,13 @@
       "S8-07"
     ],
     "requirementStatuses": {
-      "S8-01": "implemented-verified-awaiting-user-acceptance",
-      "S8-02": "checklist-approved-awaiting-item-authorization",
-      "S8-03": "checklist-approved-awaiting-item-authorization",
-      "S8-04": "checklist-approved-awaiting-item-authorization",
-      "S8-05": "checklist-approved-awaiting-item-authorization",
+      "S8-01": "accepted",
+      "S8-02": "accepted",
+      "S8-03": "accepted-subject-to-dba-provisioning",
+      "S8-04": "verified",
+      "S8-05": "complete-verified",
       "S8-06": "blocked-pending-rra-retention-policy",
-      "S8-07": "checklist-approved-awaiting-item-authorization"
+      "S8-07": "partially-verified-blocked-on-s8-06"
     },
     "requirementSummaries": {
       "S8-01": "Catalog only SRS-minimum audit actions and map each to an owning producer, versioned event, trusted actor/resource/scope/outcome/time facts, correlation/source data, and safe metadata.",
