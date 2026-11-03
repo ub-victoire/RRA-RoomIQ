@@ -6,10 +6,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import rw.rra.roomiq.notification.domain.entity.Notification;
 import rw.rra.roomiq.notification.domain.entity.NotificationEventReceipt;
+import rw.rra.roomiq.notification.domain.entity.NotificationTemplate;
 import rw.rra.roomiq.notification.domain.event.InvalidNotificationEventException;
 import rw.rra.roomiq.notification.domain.event.NotificationEvent;
 import rw.rra.roomiq.notification.domain.repository.NotificationEventReceiptRepository;
 import rw.rra.roomiq.notification.domain.repository.NotificationRepository;
+import rw.rra.roomiq.notification.domain.repository.NotificationTemplateRepository;
 import rw.rra.roomiq.notification.integration.NotificationIdentityRecipientClient;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -34,40 +36,48 @@ public class NotificationEventProcessingService {
     private final EntityManager entityManager;
     private final Clock clock;
     private final NotificationIdentityRecipientClient identityRecipientClient;
+    private final NotificationPreferenceService preferenceService;
+    private final NotificationTemplateRepository templateRepository;
+    private final NotificationTemplateRenderer templateRenderer;
+    private final ObjectMapper objectMapper;
 
     @Autowired
     public NotificationEventProcessingService(NotificationEventReceiptRepository receiptRepository,
                                               NotificationRepository notificationRepository,
                                               EntityManager entityManager,
-                                              NotificationIdentityRecipientClient identityRecipientClient) {
+                                              NotificationIdentityRecipientClient identityRecipientClient,
+                                              NotificationPreferenceService preferenceService,
+                                              NotificationTemplateRepository templateRepository,
+                                              NotificationTemplateRenderer templateRenderer,
+                                              ObjectMapper objectMapper) {
         this(receiptRepository, notificationRepository, entityManager, Clock.systemUTC(),
-                identityRecipientClient);
-    }
-
-    NotificationEventProcessingService(NotificationEventReceiptRepository receiptRepository,
-                                       NotificationRepository notificationRepository, EntityManager entityManager) {
-        this(receiptRepository, notificationRepository, entityManager, Clock.systemUTC(), null);
-    }
-
-    NotificationEventProcessingService(NotificationEventReceiptRepository receiptRepository,
-                                       NotificationRepository notificationRepository, EntityManager entityManager,
-                                       Clock clock) {
-        this(receiptRepository, notificationRepository, entityManager, clock, null);
+                identityRecipientClient, preferenceService, templateRepository, templateRenderer, objectMapper);
     }
 
     NotificationEventProcessingService(NotificationEventReceiptRepository receiptRepository,
                                        NotificationRepository notificationRepository, EntityManager entityManager,
                                        Clock clock,
-                                       NotificationIdentityRecipientClient identityRecipientClient) {
+                                       NotificationIdentityRecipientClient identityRecipientClient,
+                                       NotificationPreferenceService preferenceService,
+                                       NotificationTemplateRepository templateRepository,
+                                       NotificationTemplateRenderer templateRenderer,
+                                       ObjectMapper objectMapper) {
         this.receiptRepository = receiptRepository;
         this.notificationRepository = notificationRepository;
         this.entityManager = entityManager;
         this.clock = clock;
         this.identityRecipientClient = identityRecipientClient;
+        this.preferenceService = preferenceService;
+        this.templateRepository = templateRepository;
+        this.templateRenderer = templateRenderer;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional
     public ProcessingResult process(NotificationEvent event) {
+        if (preferenceService == null) {
+            throw new IllegalStateException("Notification preference service is required for event processing");
+        }
         if (isReservationReminder(event) || isTerminalForReservation(event)) {
             lockReservation(event.resourceId());
         }
@@ -94,24 +104,52 @@ public class NotificationEventProcessingService {
         if (isReservationReminder(event) && hasTerminalReservationEvent(event.resourceId())) {
             return ProcessingResult.PROCESSED_WITHOUT_NOTIFICATIONS;
         }
+
+        List<UUID> inAppRecipients = preferenceService.filterRecipients(event.eventType(), recipients, "IN_APP");
+        List<UUID> emailRecipients = preferenceService.filterRecipients(event.eventType(), recipients, "EMAIL");
         if (isReservationReminder(event)) {
             Instant scheduledAt = Instant.parse(event.payload().get("reminderAt").asText());
-            for (UUID recipient : recipients) {
+            RenderedNotification renderedInApp = inAppRecipients.isEmpty()
+                    ? null : renderForEvent(event, "IN_APP");
+            for (UUID recipient : inAppRecipients) {
                 notificationRepository.insertScheduledReminderIfAbsent(
                         UUID.randomUUID(), recipient, RESERVATION_RESOURCE, event.resourceId(),
-                        "IN_APP", null, scheduledAt, event.occurredAt());
+                        "IN_APP", renderedInApp.templateId(), renderedInApp.payload(), scheduledAt,
+                        event.occurredAt());
             }
-            return recipients.isEmpty() ? ProcessingResult.PROCESSED_WITHOUT_NOTIFICATIONS
-                    : ProcessingResult.PROCESSED;
+            RenderedNotification renderedEmail = emailRecipients.isEmpty()
+                    ? null : renderForEvent(event, "EMAIL");
+            for (UUID recipient : emailRecipients) {
+                notificationRepository.insertScheduledReminderIfAbsent(
+                        UUID.randomUUID(), recipient, RESERVATION_RESOURCE, event.resourceId(),
+                        "EMAIL", renderedEmail.templateId(), renderedEmail.payload(), scheduledAt,
+                        event.occurredAt());
+            }
+            return inAppRecipients.isEmpty() && emailRecipients.isEmpty()
+                    ? ProcessingResult.PROCESSED_WITHOUT_NOTIFICATIONS : ProcessingResult.PROCESSED;
         }
 
-        List<Notification> notifications = recipients.stream()
-                .map(recipient -> new Notification(UUID.randomUUID(), recipient, event.eventType(),
-                        event.resourceType(), event.resourceId(), safeDisplayPayload(event), now, "PENDING"))
+        RenderedNotification renderedInApp = inAppRecipients.isEmpty() ? null : renderForEvent(event, "IN_APP");
+        RenderedNotification renderedEmail = emailRecipients.isEmpty() ? null : renderForEvent(event, "EMAIL");
+        List<Notification> notifications = inAppRecipients.stream()
+                .map(recipient -> createNotification(event, recipient, "IN_APP", renderedInApp, now))
+                .toList();
+        List<Notification> emailNotifications = emailRecipients.stream()
+                .map(recipient -> createNotification(event, recipient, "EMAIL", renderedEmail, now))
                 .toList();
         notificationRepository.saveAll(notifications);
-        return notifications.isEmpty() ? ProcessingResult.PROCESSED_WITHOUT_NOTIFICATIONS
+        notificationRepository.saveAll(emailNotifications);
+        return notifications.isEmpty() && emailNotifications.isEmpty()
+                ? ProcessingResult.PROCESSED_WITHOUT_NOTIFICATIONS
                 : ProcessingResult.PROCESSED;
+    }
+
+    private static Notification createNotification(NotificationEvent event, UUID recipient,
+                                                   String channel, RenderedNotification rendered, Instant now) {
+        Notification notification = new Notification(UUID.randomUUID(), recipient, event.eventType(),
+                event.resourceType(), event.resourceId(), channel, rendered.payload(), now, "PENDING");
+        notification.setNotificationTemplateId(rendered.templateId());
+        return notification;
     }
 
     private List<UUID> resolveRecipients(NotificationEvent event) {
@@ -146,8 +184,23 @@ public class NotificationEventProcessingService {
             if (hasTerminalReservationEvent(resourceId)) {
                 due.forEach(notification -> notification.cancel(now));
             } else {
-                due.forEach(Notification::makePending);
-                delivered += due.size();
+                List<UUID> reminderRecipients = due.stream()
+                        .map(Notification::getRecipientUserId).distinct().toList();
+                Set<UUID> inAppRecipients = Set.copyOf(preferenceService.filterRecipients(
+                        "Reminder", reminderRecipients, "IN_APP"));
+                Set<UUID> emailRecipients = Set.copyOf(preferenceService.filterRecipients(
+                        "Reminder", reminderRecipients, "EMAIL"));
+                for (Notification notification : due) {
+                    boolean enabled = "IN_APP".equals(notification.getChannel())
+                            ? inAppRecipients.contains(notification.getRecipientUserId())
+                            : emailRecipients.contains(notification.getRecipientUserId());
+                    if (enabled) {
+                        notification.makePending();
+                        delivered++;
+                    } else {
+                        notification.cancel(now);
+                    }
+                }
             }
             notificationRepository.saveAllAndFlush(due);
         }
@@ -186,7 +239,28 @@ public class NotificationEventProcessingService {
                 event.resourceType(), event.resourceId(), clock.instant());
     }
 
-    private static String safeDisplayPayload(NotificationEvent event) {
+    private RenderedNotification renderForEvent(NotificationEvent event, String channel) {
+        if (templateRepository == null || templateRenderer == null || objectMapper == null) {
+            throw new IllegalStateException("Notification template rendering is not configured");
+        }
+        NotificationTemplate template = templateRepository.findByCodeAndChannelAndActiveTrue(
+                        event.eventType(), channel)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Active " + channel + " template is unavailable for event type " + event.eventType()));
+        Map<String, Object> safe = safeDisplayFacts(event);
+        NotificationTemplateRenderer.RenderedTemplate rendered = templateRenderer.render(template, safe);
+        safe.put("subject", rendered.subject());
+        safe.put("message", rendered.body());
+        safe.put("templateCode", template.getCode());
+        safe.put("templateVersion", template.getVersion());
+        try {
+            return new RenderedNotification(template.getId(), objectMapper.writeValueAsString(safe));
+        } catch (Exception exception) {
+            throw new IllegalStateException("Rendered notification payload could not be persisted", exception);
+        }
+    }
+
+    private static Map<String, Object> safeDisplayFacts(NotificationEvent event) {
         Map<String, Object> safe = new LinkedHashMap<>();
         safe.put("eventType", event.eventType());
         safe.put("sourceService", event.sourceService());
@@ -201,8 +275,7 @@ public class NotificationEventProcessingService {
 
         JsonNode payload = event.payload();
         if (payload != null && payload.isObject()) {
-            for (String safeField : List.of("reservationId", "meetingId", "roomId", "requesterUserId",
-                    "decidedByUserId", "releasedByUserId", "cancelledByUserId", "reasonCode",
+            for (String safeField : List.of("reservationId", "meetingId", "roomId", "reasonCode",
                     "decision", "decisionComment", "status", "action", "reminderOffsetMinutes", "timezone",
                     "occurrenceStartsAt", "reminderAt", "releasedAt", "completedAt", "periodStart", "periodEnd")) {
                 JsonNode value = payload.get(safeField);
@@ -217,11 +290,10 @@ public class NotificationEventProcessingService {
             }
         }
 
-        try {
-            return new ObjectMapper().writeValueAsString(safe);
-        } catch (Exception ex) {
-            return "{\"eventType\":\"" + event.eventType() + "\",\"safe\":true}";
-        }
+        return safe;
+    }
+
+    private record RenderedNotification(UUID templateId, String payload) {
     }
 
     public enum ProcessingResult {

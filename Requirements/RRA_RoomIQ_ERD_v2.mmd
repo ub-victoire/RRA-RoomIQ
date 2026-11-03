@@ -473,6 +473,21 @@ erDiagram
     boolean is_active "required"
   }
 
+  NOTIFICATION_AUDIT_OUTBOX {
+    uuid id PK
+    uuid event_id "required, unique"
+    varchar event_type "required"
+    uuid actor_user_id "required, Identity identifier only; no FK"
+    uuid template_id FK "required, local notification_template reference; delete restricted"
+    varchar correlation_id
+    jsonb payload "required; schema/event metadata and safe template code/version/channel/changed field names only"
+    timestamptz created_at "required"
+    timestamptz next_attempt_at "required"
+    timestamptz published_at
+    int attempt_count "required, CHECK gte 0"
+    index ix_notification_audit_outbox_pending "published_at, next_attempt_at, created_at"
+  }
+
   DELIVERY_ATTEMPT {
     uuid id PK
     uuid notification_id FK "required"
@@ -481,6 +496,15 @@ erDiagram
     varchar provider_message_id
     text failure_reason
     timestamptz attempted_at "required"
+  }
+
+  NOTIFICATION_DELIVERY_REDRIVE {
+    uuid id PK
+    uuid notification_id FK "required"
+    varchar idempotency_key "required, max 128; unique per notification"
+    uuid actor_user_id "required, Identity identifier only; no cross-service FK"
+    timestamptz requested_at "required"
+    unique uq_notification_delivery_redrive_key "notification_id, idempotency_key"
   }
 
   USER_NOTIFICATION_PREFERENCE {
@@ -603,7 +627,9 @@ erDiagram
   APP_USER ||--o{ CANCELLATION : "1..1 actor to 0..N"
 
   NOTIFICATION_TEMPLATE ||--o{ NOTIFICATION : "0..1 to 0..N"
+  NOTIFICATION_TEMPLATE ||--o{ NOTIFICATION_AUDIT_OUTBOX : "audited by"
   NOTIFICATION ||--o{ DELIVERY_ATTEMPT : "1..1 to 1..N"
+  NOTIFICATION ||--o{ NOTIFICATION_DELIVERY_REDRIVE : "1..1 to 0..N"
 
   AI_MODEL_VERSION ||--o{ RECOMMENDATION : "1..1 to 0..N"
   AI_MODEL_VERSION ||--o{ PREDICTION_RECORD : "1..1 to 0..N"

@@ -20,6 +20,8 @@ public interface AppUserRepository extends JpaRepository<AppUser, UUID>, JpaSpec
 
     Optional<AppUser> findByEmailIgnoreCase(String email);
 
+    Optional<AppUser> findByIdAndStatus(UUID id, UserStatus status);
+
     boolean existsByEmailIgnoreCase(String email);
 
     boolean existsByEmailIgnoreCaseAndIdNot(String email, UUID id);

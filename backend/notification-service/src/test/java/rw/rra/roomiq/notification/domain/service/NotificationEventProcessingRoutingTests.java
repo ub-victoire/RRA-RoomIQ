@@ -6,9 +6,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 import rw.rra.roomiq.notification.domain.entity.Notification;
+import rw.rra.roomiq.notification.domain.entity.NotificationTemplate;
 import rw.rra.roomiq.notification.domain.event.NotificationEvent;
 import rw.rra.roomiq.notification.domain.repository.NotificationEventReceiptRepository;
 import rw.rra.roomiq.notification.domain.repository.NotificationRepository;
+import rw.rra.roomiq.notification.domain.repository.NotificationTemplateRepository;
 import rw.rra.roomiq.notification.integration.NotificationIdentityRecipientClient;
 import tools.jackson.databind.ObjectMapper;
 
@@ -17,6 +19,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -25,6 +28,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -38,19 +42,34 @@ class NotificationEventProcessingRoutingTests {
     private final EntityManager entityManager = mock(EntityManager.class);
     private final NotificationIdentityRecipientClient identityClient =
             mock(NotificationIdentityRecipientClient.class);
+    private final NotificationPreferenceService preferenceService = mock(NotificationPreferenceService.class);
+    private final NotificationTemplateRepository templateRepository = mock(NotificationTemplateRepository.class);
+    private final NotificationTemplateRenderer templateRenderer = new NotificationTemplateRenderer();
     private final AtomicReference<List<Notification>> savedNotifications = new AtomicReference<>(List.of());
+    private final ObjectMapper objectMapper = new ObjectMapper();
     private final NotificationEventProcessingService service = new NotificationEventProcessingService(
             receipts, notifications, entityManager, Clock.fixed(Instant.parse("2026-10-12T12:00:00Z"),
-            ZoneOffset.UTC), identityClient);
-    private final ObjectMapper objectMapper = new ObjectMapper();
+            ZoneOffset.UTC), identityClient, preferenceService, templateRepository, templateRenderer, objectMapper);
 
     @BeforeEach
     void setUp() {
         when(receipts.insertIfAbsent(any(), any(), anyString(), anyString(), anyInt(), anyString(),
                 any(), anyLong(), nullable(String.class), nullable(String.class), anyString(), any(), any()))
                 .thenReturn(1);
+        when(preferenceService.filterRecipients(anyString(), any(), anyString()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+        when(preferenceService.filterRecipients(anyString(), any(), eq("EMAIL")))
+                .thenReturn(List.of());
+        when(templateRepository.findByCodeAndChannelAndActiveTrue(anyString(), eq("IN_APP")))
+                .thenAnswer(invocation -> {
+                    String code = invocation.getArgument(0);
+                    return Optional.of(new NotificationTemplate(UUID.randomUUID(), code, 1, "IN_APP",
+                            null, "{{eventType}}"));
+                });
         doAnswer(invocation -> {
-            savedNotifications.set(invocation.getArgument(0));
+            List<Notification> persisted = invocation.getArgument(0);
+            savedNotifications.updateAndGet(existing -> java.util.stream.Stream.concat(
+                    existing.stream(), persisted.stream()).toList());
             return null;
         }).when(notifications).saveAll(any());
     }
@@ -66,6 +85,20 @@ class NotificationEventProcessingRoutingTests {
                 .isEqualTo(NotificationEventProcessingService.ProcessingResult.PROCESSED);
         assertThat(savedNotifications.get()).extracting(Notification::getRecipientUserId).containsExactly(admin);
         verify(identityClient).resolveScopedAdmins(event);
+    }
+
+    @Test
+    void disabledPreferenceDoesNotBypassIdentityRecipientAuthorization() {
+        UUID admin = UUID.randomUUID();
+        NotificationEvent event = requestEvent("BookingRequested", 2, "SCOPED_ADMIN_REQUEST", List.of());
+        when(identityClient.resolveScopedAdmins(event)).thenReturn(List.of(admin));
+        when(preferenceService.filterRecipients("BookingRequested", List.of(admin), "IN_APP"))
+                .thenReturn(List.of());
+
+        assertThat(service.process(event))
+                .isEqualTo(NotificationEventProcessingService.ProcessingResult.PROCESSED_WITHOUT_NOTIFICATIONS);
+        verify(identityClient).resolveScopedAdmins(event);
+        assertThat(savedNotifications.get()).isEmpty();
     }
 
     @Test

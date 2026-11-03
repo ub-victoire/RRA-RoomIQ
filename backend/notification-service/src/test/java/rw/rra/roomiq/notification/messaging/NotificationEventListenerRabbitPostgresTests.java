@@ -10,20 +10,27 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.rabbitmq.RabbitMQContainer;
+import rw.rra.roomiq.notification.integration.NotificationIdentityRecipientClient;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest(properties = {
         "spring.flyway.enabled=true",
@@ -65,15 +72,33 @@ class NotificationEventListenerRabbitPostgresTests {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @MockitoBean
+    private NotificationIdentityRecipientClient identityRecipientClient;
+
     @BeforeEach
     void clearState() {
         jdbcTemplate.execute("DROP TRIGGER IF EXISTS notification_fail_once_trigger ON notification");
         jdbcTemplate.execute("DROP FUNCTION IF EXISTS notification_fail_once()");
         jdbcTemplate.execute("DROP SEQUENCE IF EXISTS notification_fail_once_sequence");
+        jdbcTemplate.update("DELETE FROM delivery_attempt");
         jdbcTemplate.update("DELETE FROM notification");
         jdbcTemplate.update("DELETE FROM notification_event_receipt");
+        seedActiveTemplate("BookingRejected");
+        seedActiveTemplate("BookingRequested");
+        seedActiveTemplate("BookingApproved");
+        seedActiveTemplate("RoomStatusChanged");
+        seedActiveTemplate("Reminder");
         rabbitAdmin.purgeQueue(NotificationEventMessagingConfiguration.QUEUE, false);
         rabbitAdmin.purgeQueue(NotificationEventMessagingConfiguration.DEAD_LETTER_QUEUE, false);
+    }
+
+    private void seedActiveTemplate(String code) {
+        jdbcTemplate.update("""
+                INSERT INTO notification_template
+                    (id, code, version, channel, subject, body_template, is_active)
+                VALUES (?, ?, 1, 'IN_APP', 'Test notification', '{{eventType}}', TRUE)
+                ON CONFLICT (code, version, channel) DO UPDATE SET is_active = TRUE
+                """, UUID.randomUUID(), code);
     }
 
     @Test
@@ -107,6 +132,60 @@ class NotificationEventListenerRabbitPostgresTests {
                 Integer.class, eventId)).isEqualTo(1);
         assertThat(count("notification")).isEqualTo(1);
         assertThat(queueCount(NotificationEventMessagingConfiguration.DEAD_LETTER_QUEUE)).isZero();
+    }
+
+    @Test
+    void secretaryRequestThenAdminApprovalRoutesNotificationsToScopedAdminAndRequesterOnce() {
+        UUID requestId = UUID.randomUUID();
+        UUID requesterId = UUID.randomUUID();
+        UUID departmentId = UUID.randomUUID();
+        UUID adminId = UUID.randomUUID();
+        UUID requestEventId = UUID.randomUUID();
+        UUID approvalEventId = UUID.randomUUID();
+        String correlationId = "secretary-booking-flow";
+        String decisionComment = "Approved for the requested meeting";
+        when(identityRecipientClient.resolveScopedAdmins(argThat(
+                event -> requestEventId.equals(event.eventId())))).thenReturn(List.of(adminId));
+
+        publish("booking.requested", bookingRequestedV2(
+                requestEventId, requestId, requesterId, departmentId, correlationId));
+        await(() -> count("notification_event_receipt") == 1 && count("notification") == 1);
+
+        publish("booking.approved", bookingApproved(
+                approvalEventId, requestId, requestEventId, requesterId, adminId, correlationId, decisionComment));
+        await(() -> count("notification_event_receipt") == 2 && count("notification") == 2);
+
+        assertThat(jdbcTemplate.queryForList("""
+                SELECT event_type, recipient_user_id::text AS recipient_user_id
+                FROM notification
+                ORDER BY created_at, event_type
+                """)).containsExactlyInAnyOrder(
+                Map.of("event_type", "BookingRequested", "recipient_user_id", adminId.toString()),
+                Map.of("event_type", "BookingApproved", "recipient_user_id", requesterId.toString()));
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT payload ->> 'decisionComment'
+                FROM notification
+                WHERE event_type = 'BookingApproved' AND recipient_user_id = ?
+                """, String.class, requesterId)).isEqualTo(decisionComment);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT correlation_id || ':' || causation_id
+                FROM notification_event_receipt
+                WHERE event_id = ?
+                """, String.class, approvalEventId)).isEqualTo(correlationId + ":" + requestEventId);
+
+        publish("booking.requested", bookingRequestedV2(
+                requestEventId, requestId, requesterId, departmentId, correlationId));
+        publish("booking.approved", bookingApproved(
+                approvalEventId, requestId, requestEventId, requesterId, adminId, correlationId, decisionComment));
+        await(() -> queueCount(NotificationEventMessagingConfiguration.QUEUE) == 0);
+
+        assertThat(count("notification_event_receipt")).isEqualTo(2);
+        assertThat(count("notification")).isEqualTo(2);
+        assertThat(queueCount(NotificationEventMessagingConfiguration.DEAD_LETTER_QUEUE)).isZero();
+        verify(identityRecipientClient).resolveScopedAdmins(argThat(
+                event -> requestEventId.equals(event.eventId())
+                        && event.eventVersion() == 2
+                        && "SCOPED_ADMIN_REQUEST".equals(event.payload().get("notificationRoute").asText())));
     }
 
     @Test
@@ -227,6 +306,58 @@ class NotificationEventListenerRabbitPostgresTests {
                 }
                 """.formatted(eventId, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
                 UUID.randomUUID());
+    }
+
+    private String bookingRequestedV2(
+            UUID eventId, UUID requestId, UUID requesterId, UUID departmentId, String correlationId) {
+        return """
+                {
+                  "eventId": "%s",
+                  "sourceService": "booking-service",
+                  "eventType": "BookingRequested",
+                  "eventVersion": 2,
+                  "aggregateType": "BOOKING_REQUEST",
+                  "aggregateId": "%s",
+                  "aggregateVersion": 1,
+                  "correlationId": "%s",
+                  "causationId": null,
+                  "occurredAt": "2026-10-12T12:00:00Z",
+                  "payload": {
+                    "recipientUserIds": [],
+                    "requesterUserId": "%s",
+                    "departmentId": "%s",
+                    "vipRoom": false,
+                    "notificationRoute": "SCOPED_ADMIN_REQUEST"
+                  }
+                }
+                """.formatted(eventId, requestId, correlationId, requesterId, departmentId);
+    }
+
+    private String bookingApproved(
+            UUID eventId, UUID requestId, UUID requestEventId, UUID requesterId, UUID adminId,
+            String correlationId, String decisionComment) {
+        return """
+                {
+                  "eventId": "%s",
+                  "sourceService": "booking-service",
+                  "eventType": "BookingApproved",
+                  "eventVersion": 1,
+                  "aggregateType": "BOOKING_REQUEST",
+                  "aggregateId": "%s",
+                  "aggregateVersion": 2,
+                  "correlationId": "%s",
+                  "causationId": "%s",
+                  "occurredAt": "2026-10-12T12:05:00Z",
+                  "payload": {
+                    "recipientUserIds": ["%s"],
+                    "requesterUserId": "%s",
+                    "decidedByUserId": "%s",
+                    "decision": "APPROVED",
+                    "decisionComment": "%s"
+                  }
+                }
+                """.formatted(eventId, requestId, correlationId, requestEventId,
+                requesterId, requesterId, adminId, decisionComment);
     }
 
     private String roomStatusChanged(UUID eventId) {

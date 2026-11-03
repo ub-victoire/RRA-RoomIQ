@@ -23,6 +23,8 @@ public final class IdentityPermissionCodes {
     public static final String BOOKING_EXTENSION_REQUEST = "BOOKING_EXTENSION_REQUEST";
     public static final String BOOKING_EXTENSION_DECIDE = "BOOKING_EXTENSION_DECIDE";
     public static final String ROOM_MANAGE = "ROOM_MANAGE";
+    public static final String NOTIFICATION_TEMPLATE_MANAGE = "NOTIFICATION_TEMPLATE_MANAGE";
+    public static final String NOTIFICATION_DELIVERY_MANAGE = "NOTIFICATION_DELIVERY_MANAGE";
 
     private IdentityPermissionCodes() {
     }

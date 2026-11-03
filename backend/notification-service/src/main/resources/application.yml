@@ -22,6 +22,10 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${NOTIFICATION_RABBITMQ_USERNAME:${RABBITMQ_USERNAME:guest}}
     password: ${NOTIFICATION_RABBITMQ_PASSWORD:${RABBITMQ_PASSWORD:guest}}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
     listener:
       simple:
         acknowledge-mode: auto
@@ -32,6 +36,19 @@ spring:
           initial-interval: ${NOTIFICATION_EVENT_RETRY_INITIAL_INTERVAL:1s}
           multiplier: ${NOTIFICATION_EVENT_RETRY_MULTIPLIER:2}
           max-interval: ${NOTIFICATION_EVENT_RETRY_MAX_INTERVAL:5s}
+  mail:
+    host: ${NOTIFICATION_SMTP_HOST:}
+    port: ${NOTIFICATION_SMTP_PORT:0}
+    username: ${NOTIFICATION_SMTP_USERNAME:}
+    password: ${NOTIFICATION_SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${NOTIFICATION_SMTP_AUTH:false}
+      mail.smtp.connectiontimeout: ${NOTIFICATION_SMTP_CONNECTION_TIMEOUT_MS:3000}
+      mail.smtp.timeout: ${NOTIFICATION_SMTP_READ_TIMEOUT_MS:5000}
+      mail.smtp.writetimeout: ${NOTIFICATION_SMTP_WRITE_TIMEOUT_MS:5000}
+      mail.smtp.starttls.enable: ${NOTIFICATION_SMTP_STARTTLS_ENABLED:true}
+      mail.smtp.starttls.required: ${NOTIFICATION_SMTP_STARTTLS_REQUIRED:true}
+      mail.smtp.ssl.enable: ${NOTIFICATION_SMTP_IMPLICIT_TLS:false}
 server:
   port: ${NOTIFICATION_SERVICE_PORT:8086}
 roomiq:
@@ -43,6 +60,24 @@ roomiq:
       key-id: ${NOTIFICATION_SERVICE_TOKEN_KEY_ID:}
       private-key-location: ${NOTIFICATION_SERVICE_TOKEN_PRIVATE_KEY_LOCATION:}
   notification:
+    email:
+      enabled: ${NOTIFICATION_EMAIL_ENABLED:false}
+      sender-address: ${NOTIFICATION_EMAIL_SENDER_ADDRESS:}
+      sender-name: ${NOTIFICATION_EMAIL_SENDER_NAME:}
+      tls-mode: ${NOTIFICATION_SMTP_TLS_MODE:STARTTLS}
+      fixed-delay-ms: ${NOTIFICATION_EMAIL_FIXED_DELAY_MS:1000}
+      batch-size: ${NOTIFICATION_EMAIL_BATCH_SIZE:25}
+      retry:
+        maximum-attempts: ${NOTIFICATION_EMAIL_RETRY_MAXIMUM_ATTEMPTS:5}
+        initial-delay-ms: ${NOTIFICATION_EMAIL_RETRY_INITIAL_DELAY_MS:60000}
+        multiplier: ${NOTIFICATION_EMAIL_RETRY_MULTIPLIER:2}
+        maximum-delay-ms: ${NOTIFICATION_EMAIL_RETRY_MAXIMUM_DELAY_MS:480000}
+        retryable-smtp-response-codes: ${NOTIFICATION_SMTP_RETRYABLE_RESPONSE_CODES:}
+    audit:
+      relay:
+        enabled: ${NOTIFICATION_AUDIT_RELAY_ENABLED:true}
+        fixed-delay-ms: ${NOTIFICATION_AUDIT_RELAY_DELAY_MS:1000}
+        confirm-timeout-ms: ${NOTIFICATION_AUDIT_RELAY_CONFIRM_TIMEOUT_MS:3000}
     events:
       enabled: ${NOTIFICATION_EVENT_CONSUMER_ENABLED:true}
     reminders:

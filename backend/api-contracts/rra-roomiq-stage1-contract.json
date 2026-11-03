@@ -1,9 +1,9 @@
 {
   "apiVersion": "1.0.0",
   "project": "RRA RoomIQ",
-  "stage": "Stage 7",
-  "status": "stage-7-checklist-approved",
-  "stageStatusReason": "Stage 6 was accepted by the user on 2026-10-12 after S6-01 through S6-14 passed verification. The user approved the Stage 7 checklist on 2026-10-12. S7-01 is complete: the Notification consumer, Booking/Room producers, and durable 15-/5-minute meeting reminders are implemented and pass focused and full-reactor verification. No Notification business API or Gateway route has been added. Event schema and supported consumer routing are recorded under stage7Progress.eventContract. Source identity is validated against the declared source service, event type, aggregate type, and routing key; because the body source field is not authentication, production RabbitMQ permissions must constrain each publisher credential to its owned routing keys. Production publisher ACL verification remains deployment work. Preferences, provider configuration, template-management authorization, and recipient policy expansion belong to their relevant later requirements.",
+  "stage": "Stage 8",
+  "status": "stage-8-checklist-approved",
+  "stageStatusReason": "Stage 7 was accepted by the user after S7-01 through S7-08 passed their verification gates. The user approved the Stage 8 Audit Service checklist and selected audit-search authorization: global Super Admins and building-scoped Admins use a dedicated AUDIT_READ permission, with scoped access limited to assigned buildings. No S8 item has implementation authorization or acceptance. Pre-existing foundations include the Identity transactional outbox and the S7 Notification template-audit consumer; the latter does not consume Identity events. AUDIT_READ, Audit search, verified append-only protection, and retention processing are not implemented. S8-06 remains blocked pending RRA policy. Stage 7 production SMTP remains disabled until RRA provisions the approved relay and organization-controlled sender. Notification inbox, template, delivery operations, and hidden Identity contact-resolution routes are not exposed through the API Gateway. Stage 7 event schema, delivery, template, and audit routing contracts are recorded under stage7Progress. Source identity in broker payloads is a body claim; production RabbitMQ credentials and routing-key ACLs remain deployment verification.",
   "stage2Progress": {
     "S2-01": {
       "name": "Identity schema migration",
@@ -1039,17 +1039,19 @@
       "requirementStatuses": {
         "S7-01": "complete",
         "S7-02": "complete",
-        "S7-03": "proposed",
-        "S7-04": "proposed",
-        "S7-05": "proposed",
-        "S7-06": "proposed",
-        "S7-07": "proposed",
-        "S7-08": "proposed"
+        "S7-03": "complete",
+        "S7-04": "complete",
+        "S7-05": "complete",
+        "S7-06": "complete",
+        "S7-07": "complete",
+        "S7-08": "complete"
       },
       "approvedErdEntities": [
         "NOTIFICATION",
         "NOTIFICATION_TEMPLATE",
+        "NOTIFICATION_AUDIT_OUTBOX",
         "DELIVERY_ATTEMPT",
+        "NOTIFICATION_DELIVERY_REDRIVE",
         "USER_NOTIFICATION_PREFERENCE"
       ],
       "srsEventFamilies": [
@@ -1066,14 +1068,11 @@
         "AutomaticReleaseOrNoShow"
       ],
       "openDecisionsBeforeImplementation": [
-        "Channel preference defaults and any non-disableable notification classes",
-        "Approved SMTP/email provider and sender configuration",
-        "Retry limit, backoff, dead-letter inspection, and redrive policy",
-        "Template management authorization",
+        "RRA deployment selection and provisioning of the approved SMTP relay endpoint, credentials, and organization-controlled sender",
         "Versioned event payload contracts and trustworthy recipient/contact resolution for event families not yet produced",
         "RRA-approved numeric throughput and latency SLOs"
       ],
-      "currentImplementation": "Notification Service consumes versioned RabbitMQ events using durable receipts, bounded retries, and a durable dead-letter path. Booking request events use version 2 routing facts: Secretary requests and extension requests request scoped Admin resolution, while direct bookings explicitly use NONE; legacy request events do not guess an audience. Notification calls Identity's hidden POST /api/v1/internal/notifications/recipient-resolution endpoint using a separate short-lived RS256 service JWT. Identity validates the token and current active Secretary permissions, derives the building from Identity-owned user data, and returns active scoped Admin identifiers only. Decision notices route to the persisted requester and preserve applicable decision comments. Cancellation and Room conflict/maintenance notices use service-owned recipient identifiers and no caller/event email or display-name overrides. Reminders remain organizer-only. MeetingCompleted, MeetingReleased, and AutomaticReleaseOrNoShow persist idempotent receipts but create no notification rows until recipient configuration is separately approved; terminal processing still suppresses outstanding reminders. Event correlation IDs are forwarded to Identity as X-Correlation-ID, and durable receipts preserve correlation and causation. Notification does not access another service database, and no Notification route is Gateway-exposed. No ERD or Flyway migration change was made for S7-02.",
+      "currentImplementation": "Notification Service consumes versioned RabbitMQ events using durable receipts, bounded retries, and a durable dead-letter path. Booking request events use version 2 routing facts: Secretary requests and extension requests request scoped Admin resolution, while direct bookings explicitly use NONE; legacy request events do not guess an audience. Notification calls Identity's hidden POST /api/v1/internal/notifications/recipient-resolution endpoint using a short-lived RS256 service JWT limited to the recipient-resolution permission. Identity validates the token and current active Secretary permissions, derives the building from Identity-owned user data, and returns active scoped Admin identifiers only. Decision notices route to the persisted requester and preserve applicable decision comments. Cancellation and Room conflict/maintenance notices use service-owned recipient identifiers and no caller/event email or display-name overrides. Reminders remain organizer-only. MeetingCompleted, MeetingReleased, and AutomaticReleaseOrNoShow persist idempotent receipts but create no notification rows until recipient configuration is separately approved; terminal processing still suppresses outstanding reminders. The authenticated inbox validates the caller's active session/account through Identity's existing protected AUTHENTICATE operation, filters/paginates by the returned recipient ID, and marks only owned notifications read atomically. Inbox payload output is allowlisted. Email-enabled events/reminders create durable EMAIL rows from active EMAIL templates and per-user preference; a scheduled worker resolves only the active recipient's Identity-stored address through the hidden delivery-contact endpoint, then sends through a vendor-neutral SMTP adapter. Delivery attempts persist approved ERD fields and sanitized failure codes. SMTP remains disabled until deployment supplies the approved relay and sender. Email contact tokens carry only the dedicated delivery-contact permission. Email retries permit five total attempts with 1, 2, 4, and 8 minute backoff; temporary network/provider and SMTP 4xx failures retry, while SMTP 5xx and invalid contact/configuration fail permanently unless a provider-documented temporary 5xx code is explicitly configured. Retry state uses the existing SCHEDULED/scheduled_at fields; permanent or exhausted attempts become DEAD_LETTER. Flyway V6 implements the user-approved NOTIFICATION_DELIVERY_REDRIVE ledger. Protected delivery health, dead-letter inspection, and idempotent redrive require Identity authorization as an active global Super Admin with NOTIFICATION_DELIVERY_MANAGE. Health/history omit recipient identifiers and notification content; latency samples are process-local. Event correlation IDs are forwarded to Identity as X-Correlation-ID, and durable receipts preserve correlation and causation. Notification does not access another service database, and no Notification route is Gateway-exposed. Flyway V5 implements the pre-existing approved DELIVERY_ATTEMPT entity.",
       "verification": {
         "bookingFocused": "50 tests passed; zero failures, errors, or skips",
         "roomFocused": "35 tests passed; zero failures, errors, or skips",
@@ -1096,7 +1095,347 @@
         "bookingFocused": "5 tests passed; zero failures, errors, or skips",
         "fullReactorCommand": "cd backend && mvn test",
         "fullBackendReactor": "10 Maven modules and 379 tests passed; zero failures, errors, or skips",
-        "acceptance": "S7-02 routing implementation and repository verification are complete. Production broker credentials and routing-key ACLs remain deployment verification and were not tested by this repository suite. S7-03 remains proposed."
+        "acceptance": "S7-02 routing implementation and repository verification are complete. Production broker credentials and routing-key ACLs remain deployment verification and were not tested by this repository suite. S7-03 was gated and verified separately; see s7-03Verification."
+      },
+      "inboxApi": {
+        "status": "complete",
+        "list": {
+          "method": "GET",
+          "paths": [
+            "/api/v1/notifications",
+            "/api/v1/me/notifications",
+            "/api/v1/inbox",
+            "/api/v1/me/inbox"
+          ],
+          "filters": {
+            "eventType": "optional, maximum 128 characters",
+            "status": ["PENDING", "SENT", "FAILED", "DEAD_LETTER", "SCHEDULED", "CANCELLED"],
+            "read": "optional boolean"
+          },
+          "pagination": {
+            "defaultPage": 0,
+            "defaultSize": 20,
+            "minimumSize": 1,
+            "maximumSize": 100
+          },
+          "sorting": {
+            "fields": ["createdAt", "readAt", "eventType", "status", "id"],
+            "directions": ["asc", "desc"],
+            "defaultField": "createdAt",
+            "defaultDirection": "desc"
+          }
+        },
+        "markRead": {
+          "method": "PATCH",
+          "paths": [
+            "/api/v1/notifications/{notificationId}/read",
+            "/api/v1/me/notifications/{notificationId}/read",
+            "/api/v1/inbox/{notificationId}/read",
+            "/api/v1/me/inbox/{notificationId}/read"
+          ],
+          "semantics": "Identity-authenticated owner-only update; read_at is set once with an atomic recipient-scoped update. Missing and other-user IDs return the same not-found error."
+        },
+        "authentication": "Forward the caller's Identity bearer token to POST /api/v1/internal/authorization/booking with action AUTHENTICATE for every request. Identity validates the active session and account and returns the authoritative subject. Identity outages fail closed.",
+        "response": "Shared ApiResponse success envelope. The inbox includes state, timestamps, event/resource references, and only allowlisted display-payload keys. Errors use the common ApiError envelope.",
+        "schema": "Existing approved NOTIFICATION.read_at, event_type, resource_type, resource_id, status, payload, recipient_user_id, and recipient/created index support inbox behavior. No ERD or migration change."
+      },
+      "s7-03Verification": {
+        "focusedNotificationCommand": "cd backend && mvn -pl notification-service -am -Dtest=NotificationInboxServiceTests,NotificationIdentityAuthenticationClientTests,NotificationEventProcessingPostgresTests -Dsurefire.failIfNoSpecifiedTests=false test",
+        "focusedNotification": "22 Notification tests passed; zero failures, errors, or skips",
+        "notificationSuiteCommand": "cd backend && mvn -pl notification-service -am test",
+        "notificationSuite": "45 Notification Service tests passed; zero failures, errors, or skips",
+        "identityCommand": "cd backend && mvn -pl identity-service -am test",
+        "identityService": "62 Identity Service tests passed; zero failures, errors, or skips",
+        "commonWebCommand": "cd backend && mvn -pl common-web test",
+        "commonWeb": "6 tests passed; zero failures, errors, or skips",
+        "fullReactorCommand": "cd backend && mvn test",
+        "fullBackendReactor": "10 Maven modules and 385 tests passed; zero failures, errors, or skips",
+        "acceptance": "S7-03 inbox implementation and repository verification are complete. No ERD or Flyway migration change was needed, and no Notification Gateway route was added."
+      },
+      "preferenceApi": {
+        "status": "complete",
+        "list": {
+          "method": "GET",
+          "path": "/api/v1/me/notification-preferences",
+          "semantics": "Identity-authenticated owner receives effective settings for all event types accepted by the versioned Notification event codec. Missing rows return inAppEnabled=true, emailEnabled=false, configured=false."
+        },
+        "replace": {
+          "method": "PUT",
+          "path": "/api/v1/me/notification-preferences/{eventType}",
+          "request": {
+            "inAppEnabled": "required boolean",
+            "emailEnabled": "required boolean"
+          },
+          "semantics": "Identity derives the preference owner; caller-supplied user IDs are not accepted. PostgreSQL upsert on (user_id,event_type) makes repeated same-payload updates safe. Unsupported event types and missing channel flags return the shared ApiError envelope."
+        },
+        "supportedEventTypes": [
+          "BookingRequested",
+          "BookingApproved",
+          "BookingRejected",
+          "BookingCancelled",
+          "ExtensionRequested",
+          "ExtensionDecided",
+          "RoomStatusChanged",
+          "RoomMaintenanceChanged",
+          "MeetingCompleted",
+          "MeetingReleased",
+          "Reminder",
+          "AutomaticReleaseOrNoShow"
+        ],
+        "channelBehavior": "Saved in-app and email flags are independent; no event class is non-disableable. In-app event processing and due reminder delivery enforce the effective in-app flag. Effective email preference independently gates durable EMAIL event/reminder rows handled by S7-06. SMTP delivery remains disabled until approved deployment configuration is provided.",
+        "authentication": "Forward the caller bearer token to Identity's existing protected AUTHENTICATE operation for each request and use only Identity's active account ID.",
+        "schema": "Flyway V3 implements the approved USER_NOTIFICATION_PREFERENCE fields and unique (user_id,event_type) constraint without extra fields, indexes, or a cross-service foreign key. Notification owns the table and stores user_id as an Identity reference identifier. No ERD change."
+      },
+      "s7-04Verification": {
+        "focusedNotificationCommand": "cd backend && mvn -pl notification-service -am -Dtest=NotificationEventProcessingPostgresTests,NotificationInboxServiceTests,NotificationIdentityAuthenticationClientTests,NotificationEventProcessingRoutingTests -Dsurefire.failIfNoSpecifiedTests=false test",
+        "focusedNotification": "36 Notification tests passed; zero failures, errors, or skips",
+        "notificationSuiteCommand": "cd backend && mvn -pl notification-service -am test",
+        "notificationSuite": "54 Notification Service tests passed; zero failures, errors, or skips",
+        "identityCommand": "cd backend && mvn -pl identity-service -am test",
+        "identityService": "62 Identity Service tests passed; zero failures, errors, or skips",
+        "commonWebCommand": "cd backend && mvn -pl common-web test",
+        "commonWeb": "6 tests passed; zero failures, errors, or skips",
+        "fullReactorCommand": "cd backend && mvn test",
+        "fullBackendReactor": "10 Maven modules and 394 tests passed; zero failures, errors, or skips",
+        "acceptance": "S7-04 preference persistence, owner-derived authorization, idempotent replacement, defaults, in-app suppression, and required regressions passed. S7-06 subsequently implemented asynchronous email delivery using the independent saved email preference."
+      },
+      "templateApi": {
+        "status": "implemented",
+        "list": {
+          "method": "GET",
+          "path": "/api/v1/internal/notification-templates",
+          "response": "Shared ApiResponse containing template versions ordered by code, channel, and descending version."
+        },
+        "create": {
+          "method": "POST",
+          "path": "/api/v1/internal/notification-templates",
+          "request": {
+            "code": "Required 1-128 character identifier matching [A-Za-z][A-Za-z0-9._-]*",
+            "version": "Required positive integer",
+            "channel": "IN_APP or EMAIL",
+            "subject": "Optional, maximum 500 characters; required and non-blank for EMAIL",
+            "bodyTemplate": "Required, maximum 20000 characters"
+          },
+          "semantics": "Creates an immutable version initially inactive. Duplicate (code,version,channel) is rejected. Template placeholders use {{variableName}} syntax."
+        },
+        "activation": {
+          "method": "PATCH",
+          "path": "/api/v1/internal/notification-templates/{templateId}/activation",
+          "request": {
+            "active": "Required boolean"
+          },
+          "semantics": "Activation serializes per code/channel, deactivates the currently active version, and activates the selected version atomically."
+        },
+        "authorization": {
+          "notification": "Each operation forwards the caller bearer token to Identity's protected POST /api/v1/internal/authorization/notification-templates action.",
+          "identityPolicy": "Requires an active global SUPER_ADMIN assignment and explicit NOTIFICATION_TEMPLATE_MANAGE permission; neither caller-supplied roles nor permissions are trusted.",
+          "gateway": "No Notification route is added to the API Gateway."
+        },
+        "rendering": {
+          "inAppTemplateCode": "The implemented convention is exact equality between eventType and IN_APP template code.",
+          "variables": "Only placeholders in the template are substituted, using the explicit safe-display fact allowlist. Missing values and malformed syntax fail processing; body values are HTML-escaped and subject substitutions have line breaks removed.",
+          "missingTemplate": "Missing active, incompatible, or malformed templates fail processing; no fallback or fabricated content is used.",
+          "email": "EMAIL versions require a subject and are rendered into durable EMAIL notification rows by S7-06 when email preference is enabled."
+        },
+        "audit": {
+          "transactionalOutbox": "Template creation/activation/deactivation and a safe audit event commit atomically into Notification-owned notification_audit_outbox.",
+          "eventTypes": [
+            "NotificationTemplateCreated",
+            "NotificationTemplateActivated",
+            "NotificationTemplateDeactivated"
+          ],
+          "eventRoutingKey": "audit.notification",
+          "auditQueue": "roomiq.audit.notification.v1",
+          "deadLetterQueue": "roomiq.audit.notification.dead-letter.v1",
+          "payloadPrivacy": "Audit metadata contains template code/version/channel and changed fields, never subject or body content.",
+          "consumer": "Audit validates the strict schema, persists idempotently in its own AUDIT_EVENT store, and dead-letters poison/unsupported messages."
+        },
+        "schema": "Identity Flyway V3 adds the permission catalog entry. Notification Flyway V4 adds NOTIFICATION_TEMPLATE and the explicitly approved NOTIFICATION_AUDIT_OUTBOX. No unapproved ERD changes."
+      },
+      "s7-05Verification": {
+        "focusedNotificationCommand": "mvn -f backend/pom.xml -pl notification-service -am -Dtest=NotificationTemplateControllerTests,NotificationTemplateRendererTests,NotificationAuditOutboxRelayTests,NotificationEventProcessingRoutingTests,NotificationEventProcessingPostgresTests,NotificationInboxServiceTests,NotificationIdentityAuthenticationClientTests -Dsurefire.failIfNoSpecifiedTests=false test",
+        "focusedNotification": "51 Notification tests passed; zero failures, errors, or skips",
+        "rabbitListenerCommand": "mvn -f backend/pom.xml -pl notification-service -am -Dtest=NotificationEventListenerRabbitPostgresTests -Dsurefire.failIfNoSpecifiedTests=false test",
+        "rabbitListener": "5 tests passed after active template test fixtures were added; zero failures, errors, or skips",
+        "notificationSuiteCommand": "mvn -f backend/pom.xml -pl notification-service -am test",
+        "notificationSuite": "69 Notification Service tests passed; zero failures, errors, or skips",
+        "auditCommand": "mvn -f backend/pom.xml -pl audit-service -am test",
+        "auditService": "6 Audit Service tests passed; zero failures, errors, or skips",
+        "identityCommand": "mvn -f backend/pom.xml -pl identity-service -am test",
+        "identityService": "63 Identity Service tests passed; zero failures, errors, or skips",
+        "commonWebCommand": "mvn -f backend/pom.xml -pl common-web test",
+        "commonWeb": "6 tests passed; zero failures, errors, or skips",
+        "fullReactorCommand": "mvn -f backend/pom.xml test",
+        "fullBackendReactor": "11 Maven modules and 415 tests passed; zero failures, errors, or skips",
+        "acceptance": "S7-05 template administration, safe rendering, atomic active-version switching, transactional audit outbox, Audit persistence/dead-letter handling, and required regressions passed. S7-06 subsequently implemented delivery of active EMAIL templates. The Notification RabbitMQ test fixtures were updated to seed active templates required by the strict renderer."
+      },
+      "s7-06EmailDelivery": {
+        "status": "implemented",
+        "worker": "A scheduled Notification Service worker claims pending EMAIL rows with PostgreSQL FOR UPDATE SKIP LOCKED, resolves the active recipient's trusted address from Identity, and sends through a vendor-neutral Spring SMTP adapter.",
+        "trustedContact": {
+          "method": "POST",
+          "path": "/api/v1/internal/notifications/delivery-contact",
+          "visibility": "Hidden Identity internal endpoint; not exposed through the API Gateway.",
+          "request": {
+            "userId": "Required Identity-owned active user UUID"
+          },
+          "response": "The stored email address for that active user only; absent, inactive, or addressless accounts fail closed.",
+          "serviceAuthorization": "Short-lived RS256 Notification service JWT carries only notification:delivery-contact-resolution for this call. Notification stores recipient identifiers, never caller/event-provided email overrides."
+        },
+        "attempts": "Notification Flyway V5 implements the pre-existing approved DELIVERY_ATTEMPT ERD fields. Each try records a monotonically selected attempt number, result, attempted time, optional provider message ID, and a generic redacted failure reason. Generic SMTP has no standardized provider message ID; null is persisted when the relay does not provide one.",
+        "outcomes": "Success marks the EMAIL notification SENT. Invalid stored content, unavailable trusted contact, or SMTP failure marks it FAILED and records a sanitized code without exception detail, credentials, recipient address, or message body.",
+        "configuration": {
+          "emailEnabledDefault": false,
+          "productionGate": "Remain disabled until RRA provides the approved SMTP-compatible relay endpoint, credentials, and organization-controlled sender address/name.",
+          "externalizedVariables": [
+            "NOTIFICATION_EMAIL_ENABLED",
+            "NOTIFICATION_SMTP_HOST",
+            "NOTIFICATION_SMTP_PORT",
+            "NOTIFICATION_SMTP_USERNAME",
+            "NOTIFICATION_SMTP_PASSWORD",
+            "NOTIFICATION_SMTP_AUTH",
+            "NOTIFICATION_SMTP_TLS_MODE",
+            "NOTIFICATION_SMTP_STARTTLS_ENABLED",
+            "NOTIFICATION_SMTP_STARTTLS_REQUIRED",
+            "NOTIFICATION_SMTP_IMPLICIT_TLS",
+            "NOTIFICATION_SMTP_CONNECTION_TIMEOUT_MS",
+            "NOTIFICATION_SMTP_READ_TIMEOUT_MS",
+            "NOTIFICATION_SMTP_WRITE_TIMEOUT_MS",
+            "NOTIFICATION_EMAIL_SENDER_ADDRESS",
+            "NOTIFICATION_EMAIL_SENDER_NAME",
+            "NOTIFICATION_EMAIL_FIXED_DELAY_MS",
+            "NOTIFICATION_EMAIL_BATCH_SIZE"
+          ],
+          "tls": "STARTTLS required by default; implicit TLS requires mutually consistent TLS flags. Credentials are deployment-injected and no real endpoint or sender value is committed."
+        },
+        "transactionBoundary": "Email work is asynchronous and is not part of Booking, approval, cancellation, extension, Room, or Scheduling transactions. SMTP is an external side effect, so exactly-once provider delivery is not claimed. S7-07 implements bounded retry/dead-letter/redrive.",
+        "schema": "No ERD change. Flyway V5 creates delivery_attempt with the fields already defined in the approved ERD."
+      },
+      "s7-06Verification": {
+        "focusedEmailCommand": "mvn -f backend/pom.xml -pl notification-service -am -Dtest=NotificationEmailDeliveryServiceTests,SmtpNotificationEmailSenderTests,NotificationEmailPropertiesTests,NotificationEmailContactClientTests -Dsurefire.failIfNoSpecifiedTests=false test",
+        "focusedEmailResult": "7 email sender, GreenMail SMTP, contact-client, and configuration tests passed; zero failures, errors, or skips.",
+        "postgresNotificationCommand": "mvn -f backend/pom.xml -pl notification-service -am -Dtest=NotificationEventProcessingPostgresTests -Dsurefire.failIfNoSpecifiedTests=false test",
+        "postgresNotificationResult": "29 PostgreSQL Notification tests passed, including Flyway V5 delivery-attempt/entity mapping; zero failures, errors, or skips.",
+        "routingAndTokenCommand": "mvn -f backend/pom.xml -pl notification-service -am -Dtest=NotificationEventProcessingRoutingTests,NotificationServiceTokenProviderTests,NotificationEmailContactClientTests -Dsurefire.failIfNoSpecifiedTests=false test",
+        "routingAndTokenResult": "10 recipient-routing and service-token tests passed; zero failures, errors, or skips.",
+        "notificationServiceCommand": "mvn -f backend/pom.xml -pl notification-service -am test",
+        "notificationServiceResult": "78 tests passed; zero failures, errors, or skips.",
+        "identityCommand": "mvn -f backend/pom.xml -pl identity-service -am test",
+        "identityResult": "66 tests passed; zero failures, errors, or skips.",
+        "commonWebCommand": "mvn -f backend/pom.xml -pl common-web test",
+        "commonWebResult": "6 tests passed; zero failures, errors, or skips.",
+        "fullBackendCommand": "mvn -f backend/pom.xml test",
+        "fullBackendResult": "11 Maven modules and 427 tests passed; zero failures, errors, or skips. Testcontainers-backed PostgreSQL and RabbitMQ tests ran.",
+        "acceptance": "S7-06 implementation and its verification gate passed. Production relay/sender provisioning remains external; email is disabled by default. S7-07 retry/dead-letter/redrive was subsequently implemented and verified under s7-07Verification."
+      },
+      "s7-07EmailRetryPolicy": {
+        "status": "implemented-and-verified",
+        "maximumAttempts": 5,
+        "attemptMeaning": "One initial send plus four retries",
+        "backoff": [
+          "1 minute",
+          "2 minutes",
+          "4 minutes",
+          "8 minutes"
+        ],
+        "retryableByDefault": [
+          "temporary network/provider errors",
+          "SMTP 4xx responses"
+        ],
+        "permanentByDefault": [
+          "SMTP 5xx responses",
+          "invalid recipients",
+          "invalid sender/configuration"
+        ],
+        "providerOverride": "Provider-documented temporary SMTP 5xx response codes may be explicitly configured with NOTIFICATION_SMTP_RETRYABLE_RESPONSE_CODES.",
+        "durableState": "Retry-waiting EMAIL rows use the existing SCHEDULED status and scheduled_at. Permanent or exhausted failures use DEAD_LETTER. Each actual send attempt is persisted in DELIVERY_ATTEMPT.",
+        "configuration": {
+          "maximumAttempts": "NOTIFICATION_EMAIL_RETRY_MAXIMUM_ATTEMPTS",
+          "initialDelayMs": "NOTIFICATION_EMAIL_RETRY_INITIAL_DELAY_MS",
+          "multiplier": "NOTIFICATION_EMAIL_RETRY_MULTIPLIER",
+          "maximumDelayMs": "NOTIFICATION_EMAIL_RETRY_MAXIMUM_DELAY_MS",
+          "retryableSmtpResponseCodes": "NOTIFICATION_SMTP_RETRYABLE_RESPONSE_CODES"
+        }
+      },
+      "deliveryOperationsApi": {
+        "authorization": "Identity checks the caller bearer for an active global Super Admin with the explicit NOTIFICATION_DELIVERY_MANAGE permission on every operation. Permission catalog entry is added by Identity Flyway V4; assignment is an explicit administrative action.",
+        "gateway": "No Notification delivery operation is exposed through API Gateway.",
+        "routes": [
+          {
+            "method": "GET",
+            "path": "/api/v1/internal/notification-delivery/health",
+            "response": "Aggregate queue depth, oldest queued creation time, retries, dead-letter count, delivery successes/failures, and latency count/average/maximum; no recipient or message-content data."
+          },
+          {
+            "method": "GET",
+            "path": "/api/v1/internal/notification-delivery/dead-letters",
+            "query": "page defaults to 0; size defaults to 25 and is bounded from 1 to 100.",
+            "response": "Paginated dead-letter summaries without recipient IDs or notification content."
+          },
+          {
+            "method": "GET",
+            "path": "/api/v1/internal/notification-delivery/dead-letters/{notificationId}",
+            "response": "Sanitized delivery attempt and redrive history; recipient IDs and message payload are omitted."
+          },
+          {
+            "method": "POST",
+            "path": "/api/v1/internal/notification-delivery/dead-letters/{notificationId}/redrive",
+            "headers": [
+              "Authorization",
+              "Idempotency-Key"
+            ],
+            "response": "Schedules the existing dead-letter notification for a fresh bounded attempt cycle; duplicate notification/key replays are idempotent and do not create a notification."
+          }
+        ],
+        "healthMetrics": "Database aggregates provide durable queue, retry, dead-letter, success, and failure counts. Delivery latency count/average/maximum is a process-local Micrometer timer and resets on process restart."
+      },
+      "s7-07ApprovedSchema": {
+        "erdEntity": "NOTIFICATION_DELIVERY_REDRIVE",
+        "migration": "Notification Flyway V6",
+        "columns": [
+          "id UUID primary key",
+          "notification_id UUID foreign key to Notification-owned notification",
+          "idempotency_key VARCHAR(128)",
+          "actor_user_id UUID without cross-service foreign key",
+          "requested_at TIMESTAMPTZ"
+        ],
+        "constraint": "UNIQUE(notification_id,idempotency_key)",
+        "approval": "Exact table and uniqueness rule were presented to and explicitly approved by the user before the ERD or migration was modified."
+      },
+      "s7-07Verification": {
+        "focusedNotificationCommand": "mvn -f backend/pom.xml -pl notification-service -am -Dtest=NotificationEventProcessingPostgresTests,NotificationDeliveryOperationsControllerTests,NotificationEmailContactClientTests,NotificationEmailFailureClassifierTests,NotificationEmailDeliveryServiceTests -Dsurefire.failIfNoSpecifiedTests=false test",
+        "focusedNotificationResult": "45 Notification tests passed; zero failures, errors, or skips. The common-web dependency also passed 6 tests.",
+        "notificationServiceCommand": "mvn -f backend/pom.xml -pl notification-service -am test",
+        "notificationServiceResult": "Notification module 98 tests and common-web 6 tests passed; zero failures, errors, or skips.",
+        "identityCommand": "mvn -f backend/pom.xml -pl identity-service -am test",
+        "identityResult": "Identity module 67 tests and common-web 6 tests passed; zero failures, errors, or skips.",
+        "commonWebCommand": "mvn -f backend/pom.xml -pl common-web test",
+        "commonWebResult": "6 tests passed; zero failures, errors, or skips.",
+        "fullBackendCommand": "mvn -f backend/pom.xml test",
+        "fullBackendResult": "All 11 Maven modules and 448 tests passed; zero failures, errors, or skips. Testcontainers-backed PostgreSQL and RabbitMQ tests ran.",
+        "acceptance": "S7-07 implementation and repository verification are complete. Production SMTP endpoint/sender provisioning, provider-specific retryable 5xx codes, and RRA numeric SLOs remain external decisions."
+      },
+      "s7-08Verification": {
+        "focusedEndToEndCommand": "mvn -f backend/pom.xml -pl notification-service -am -Dtest=NotificationEventListenerRabbitPostgresTests -Dsurefire.failIfNoSpecifiedTests=false test",
+        "focusedEndToEndResult": "6 RabbitMQ/PostgreSQL integration tests passed; zero failures, errors, or skips. Exit code 0.",
+        "endToEndFlow": "secretaryRequestThenAdminApprovalRoutesNotificationsToScopedAdminAndRequesterOnce publishes BookingRequested version 2 with SCOPED_ADMIN_REQUEST followed by BookingApproved. The real Notification RabbitMQ listener and PostgreSQL persist the scoped Admin request notification and requester decision notification, including decision comment and correlation/causation. Replaying both messages produces no duplicate receipt or notification. Identity recipient lookup is stubbed at the Notification client boundary in this flow test; the HTTP client contract and Identity scope/authorization behavior are covered by separate client and Identity tests. Booking PostgreSQL tests verify the source outbox facts.",
+        "coverage": {
+          "duplicateAndOutOfOrder": "RabbitMQ redelivery and concurrent PostgreSQL duplicate processing are tested; a committed terminal event before a late reminder prevents the reminder effect.",
+          "channelPreferencesAndRecipientIsolation": "PostgreSQL preference tests verify independent channel flags and owner-only inbox/read state; routing tests reject untrusted recipient overrides; Identity tests verify scoped Admin lookup.",
+          "templatesAndProviderFailures": "PostgreSQL/API tests cover safe escaped rendering and missing-template rollback; SMTP tests cover successful send, sanitized provider failure, permanent failure, retry exhaustion, and attempt history.",
+          "retryDeadLetterAndRedrive": "PostgreSQL migration/domain/API tests cover durable scheduled retries, permanent/exhausted dead letters, sanitized inspection, authorization, idempotent redrive, and health output.",
+          "schemaAndContracts": "V1-V6 PostgreSQL migration/entity tests, protected API/OpenAPI tests, Identity permission tests, and existing approved ERD alignment; S7-08 makes no schema change."
+        },
+        "notificationServiceCommand": "mvn -f backend/pom.xml -pl notification-service -am test",
+        "notificationServiceResult": "Notification Service 99 tests and common-web 6 tests passed; zero failures, errors, or skips. Exit code 0.",
+        "identityCommand": "mvn -f backend/pom.xml -pl identity-service -am test",
+        "identityResult": "Identity Service 67 tests and common-web 6 tests passed; zero failures, errors, or skips. Exit code 0.",
+        "commonWebCommand": "mvn -f backend/pom.xml -pl common-web test",
+        "commonWebResult": "6 tests passed; zero failures, errors, or skips. Exit code 0.",
+        "fullBackendCommand": "mvn -f backend/pom.xml test",
+        "fullBackendResult": "All 11 Maven modules and 448 tests passed; zero failures, errors, or skips. Exit code 0. Testcontainers-backed PostgreSQL and RabbitMQ tests ran.",
+        "documentation": "Backend roadmap, Notification Service README/configuration example, backend architecture, API contract README and JSON, and Identity authorization guidance are synchronized. No Gateway route or ERD/migration change was made.",
+        "acceptance": "S7-08 verification is complete. All eight Stage 7 requirements passed their individual verification gates, and the user accepted Stage 7."
       },
       "approvedRoutingDecisions": {
         "requestAndExtensionRequests": "Version-2 Booking event route facts distinguish Secretary requests (SCOPED_ADMIN_REQUEST) from direct bookings (NONE); Identity resolves active Admin identifiers in the current Identity-derived building scope.",
@@ -1361,6 +1700,68 @@
         }
       },
       "erdPolicy": "The user-approved durable event persistence consists of Booking's existing booking_event_outbox, NOTIFICATION_EVENT_RECEIPT, and ROOM_EVENT_OUTBOX as shown in the ERD and Room Flyway migration. No additional ERD or migration change is authorized without an exact proposal and explicit user approval."
+  },
+  "stage8Progress": {
+    "status": "s8-01-implemented-verified-awaiting-user-acceptance",
+    "implementationAuthorization": "S8-01 was explicitly authorized and completed as a documentation-only action catalog. S8-02 through S8-07 remain unauthorized; obtain explicit user approval for each item before implementation. S8-06 additionally requires formal RRA retention and archival/disposal policy approval.",
+    "implementationStarted": true,
+    "checklist": "Documentation.md#stage-8-requirement-checklist-approved",
+    "actionOwnerMatrix": "../docs/audit-action-owner-matrix.md",
+    "s8-01Scope": "Documentation-only catalog and source evidence mapping. No application code, event/API contract, ERD, or migration was changed. Missing producer/consumer paths are recorded as gaps and are not claimed implemented.",
+    "s8-01Verification": {
+      "catalogStructure": "Passed: JSON parses; action-owner matrix has 15 columns and 14 action rows; all required action categories are present.",
+      "identityCommand": "mvn -f backend/pom.xml -pl identity-service -am test",
+      "identityResult": "Passed: Identity 67 tests and common-web 6 tests; 0 failures, errors, or skips.",
+      "commonWebCommand": "mvn -f backend/pom.xml -pl common-web test",
+      "commonWebResult": "Passed: 6 tests; 0 failures, errors, or skips.",
+      "fullReactorCommand": "mvn -f backend/pom.xml test",
+      "fullReactorResult": "Passed: all 11 reactor projects, 449 tests; 0 failures, errors, or skips.",
+      "diffCheck": "git diff --check passed."
+    },
+    "requirements": [
+      "S8-01",
+      "S8-02",
+      "S8-03",
+      "S8-04",
+      "S8-05",
+      "S8-06",
+      "S8-07"
+    ],
+    "requirementStatuses": {
+      "S8-01": "implemented-verified-awaiting-user-acceptance",
+      "S8-02": "checklist-approved-awaiting-item-authorization",
+      "S8-03": "checklist-approved-awaiting-item-authorization",
+      "S8-04": "checklist-approved-awaiting-item-authorization",
+      "S8-05": "checklist-approved-awaiting-item-authorization",
+      "S8-06": "blocked-pending-rra-retention-policy",
+      "S8-07": "checklist-approved-awaiting-item-authorization"
+    },
+    "requirementSummaries": {
+      "S8-01": "Catalog only SRS-minimum audit actions and map each to an owning producer, versioned event, trusted actor/resource/scope/outcome/time facts, correlation/source data, and safe metadata.",
+      "S8-02": "Integrate approved source-owned outboxes/events into Audit without cross-service database access; preserve local transaction, durable publication, idempotent consumption, acknowledgement, retry, and dead-letter behavior.",
+      "S8-03": "Persist and deduplicate through the approved AUDIT_EVENT schema; reject conflicting event-ID reuse and establish/test an explicit append-only integrity mechanism.",
+      "S8-04": "Preserve approved actor/action/resource/scope/outcome/time, correlation and available causation data while redacting sensitive values; present any schema gap for approval.",
+      "S8-05": "Provide protected, validated, paginated/filterable audit search under AUDIT_READ for global Super Admins and assigned-building-scoped Admins; enforce scope in queries and prevent privacy leaks.",
+      "S8-06": "Apply retention/archive/legal-hold/disposal only after RRA approves the complete policy; currently blocked.",
+      "S8-07": "Complete focused security/integration/observability/documentation evidence and per-item Identity, common-web, and full-reactor regressions."
+    },
+    "existingImplementation": {
+      "auditService": "Existing code validates and idempotently persists three Notification template-administration event types through a durable queue. It has no Audit-side Identity queue/listener, search API, retention processing, or verified append-only/tamper-resistance control.",
+      "identity": "A transactional identity_audit_outbox producer exists, but its events are not consumed by an Audit Service listener.",
+      "permission": "AUDIT_READ is an approved policy but is absent from IdentityPermissionCodes and Identity migrations.",
+      "schema": "The current Audit V1 migration maps the existing AUDIT_EVENT ERD fields. It contains no trigger/immutability control or secondary index; no Stage 8 schema change is approved."
+    },
+    "openDecisions": [
+      "RRA retention duration(s) and start point, archive destination/format/protection/access, legal-hold requirement/authority/release, disposal or deletion process/authorization, and applicable RRA/regulatory approvals",
+      "Append-only/tamper-resistance enforcement mechanism; current application repository and migration do not establish it",
+      "Whether source service and causation identifiers must be persisted/searchable; approved AUDIT_EVENT schema has correlation_id only",
+      "Audit search filters/sorts, response field allowlist, pagination bounds, and whether a new Identity internal authorization contract is needed"
+    ],
+    "approvedDecisions": [
+      "Audit search: global Super Admins and building-scoped Admins must hold the dedicated AUDIT_READ permission; scoped Admins are restricted to assigned building scopes",
+      "Use the SRS-listed minimum audit action catalog; additional administrative event types require explicit approval"
+    ],
+    "erdPolicy": "Use the approved AUDIT_EVENT entity as the persistence contract. Do not modify the ERD or migrations without an exact proposal and explicit user approval."
   },
   "stage6Progress": {
     "status": "complete",

@@ -3,8 +3,44 @@ spring:
     import: optional:file:.env[.properties]
   application:
     name: audit-service
+  datasource:
+    url: ${AUDIT_DB_URL:jdbc:postgresql://localhost:5432/roomiq_audit}
+    username: ${AUDIT_DB_USERNAME}
+    password: ${AUDIT_DB_PASSWORD}
+  flyway:
+    enabled: true
+    user: ${AUDIT_DB_MIGRATION_USERNAME}
+    password: ${AUDIT_DB_MIGRATION_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${AUDIT_RABBITMQ_USERNAME:${RABBITMQ_USERNAME:guest}}
+    password: ${AUDIT_RABBITMQ_PASSWORD:${RABBITMQ_PASSWORD:guest}}
+    listener:
+      simple:
+        acknowledge-mode: auto
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: ${AUDIT_EVENT_MAX_ATTEMPTS:3}
+          initial-interval: ${AUDIT_EVENT_RETRY_INITIAL_INTERVAL:1s}
+          multiplier: ${AUDIT_EVENT_RETRY_MULTIPLIER:2}
+          max-interval: ${AUDIT_EVENT_RETRY_MAX_INTERVAL:5s}
 server:
   port: ${AUDIT_SERVICE_PORT:8087}
+roomiq:
+  audit:
+    identity:
+      events:
+        enabled: ${AUDIT_IDENTITY_EVENTS_ENABLED:true}
 management:
   endpoints:
     web:

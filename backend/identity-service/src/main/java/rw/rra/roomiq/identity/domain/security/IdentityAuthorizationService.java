@@ -37,6 +37,8 @@ import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.BOO
 import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.BOOKING_LIFECYCLE_OWN;
 import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.BOOKING_REQUEST_CREATE;
 import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.ROOM_MANAGE;
+import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.NOTIFICATION_TEMPLATE_MANAGE;
+import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.NOTIFICATION_DELIVERY_MANAGE;
 
 @Service("identityAuthorization")
 @Transactional(readOnly = true)
@@ -655,6 +657,18 @@ public class IdentityAuthorizationService {
 
     public UUID authenticatedUserId(Authentication authentication) {
         return actorId(authentication);
+    }
+
+    public boolean canManageNotificationTemplates(Authentication authentication) {
+        UUID userId = actorId(authentication);
+        return userId != null && authorization.isActiveSuperAdminWithPermission(userId,
+                UserStatus.ACTIVE, NOTIFICATION_TEMPLATE_MANAGE);
+    }
+
+    public boolean canManageNotificationDelivery(Authentication authentication) {
+        UUID userId = actorId(authentication);
+        return userId != null && authorization.isActiveSuperAdminWithPermission(userId,
+                UserStatus.ACTIVE, NOTIFICATION_DELIVERY_MANAGE);
     }
 
     private boolean isActive(UUID userId) {

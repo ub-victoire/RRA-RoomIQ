@@ -37,6 +37,7 @@ import java.util.UUID;
 public class NotificationServiceTokenProvider {
     public static final String AUDIENCE = "rra-roomiq-identity-recipient-resolution";
     public static final String PERMISSION = "notification:recipient-resolution";
+    public static final String EMAIL_PERMISSION = "notification:delivery-contact-resolution";
     private static final String SUBJECT = "notification-service";
     private static final Duration TOKEN_LIFETIME = Duration.ofMinutes(2);
 
@@ -68,6 +69,13 @@ public class NotificationServiceTokenProvider {
     }
 
     public String createAuthorizationHeader() {
+        return createAuthorizationHeader(PERMISSION);
+    }
+
+    public String createAuthorizationHeader(String permission) {
+        if (!PERMISSION.equals(permission) && !EMAIL_PERMISSION.equals(permission)) {
+            throw new IllegalArgumentException("Unsupported Notification service-token permission");
+        }
         if (issuer.isBlank() || audience.isBlank() || keyId.isBlank() || privateKeyLocation.isBlank()) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                     "Notification service identity is not configured");
@@ -87,7 +95,7 @@ public class NotificationServiceTokenProvider {
                     .issuedAt(now)
                     .expiresAt(now.plus(TOKEN_LIFETIME))
                     .id(UUID.randomUUID().toString())
-                    .claim("permissions", List.of(PERMISSION))
+                    .claim("permissions", List.of(permission))
                     .build();
             String token = encoder.encode(JwtEncoderParameters.from(
                     JwsHeader.with(SignatureAlgorithm.RS256).keyId(keyId).build(), claims)).getTokenValue();

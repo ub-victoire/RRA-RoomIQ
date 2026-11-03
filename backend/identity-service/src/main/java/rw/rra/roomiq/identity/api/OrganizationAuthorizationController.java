@@ -16,6 +16,8 @@ import rw.rra.roomiq.identity.domain.dto.BookingAuthorizationResponse;
 import rw.rra.roomiq.identity.domain.dto.OrganizationAuthorizationRequest;
 import rw.rra.roomiq.identity.domain.dto.MeetingAuthorizationRequest;
 import rw.rra.roomiq.identity.domain.dto.MeetingAuthorizationResponse;
+import rw.rra.roomiq.identity.domain.dto.NotificationTemplateAuthorizationResponse;
+import rw.rra.roomiq.identity.domain.dto.NotificationDeliveryAuthorizationResponse;
 import rw.rra.roomiq.identity.domain.dto.RoomManagementAuthorizationRequest;
 import rw.rra.roomiq.identity.domain.dto.RoomManagementAuthorizationResponse;
 import rw.rra.roomiq.identity.domain.dto.SchedulingAuthorizationRequest;
@@ -134,7 +136,32 @@ public class OrganizationAuthorizationController {
         if (!allowed) {
             throw new AccessDeniedException("Organization access is denied");
         }
+
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/notification-templates")
+    @Operation(summary = "Authorize notification-template administration",
+            description = "Requires the authenticated active user to hold the global SUPER_ADMIN role and the explicit NOTIFICATION_TEMPLATE_MANAGE permission.")
+    public ResponseEntity<NotificationTemplateAuthorizationResponse> authorizeNotificationTemplateManagement(
+            Authentication authentication) {
+        UUID actorUserId = authorization.authenticatedUserId(authentication);
+        if (actorUserId == null || !authorization.canManageNotificationTemplates(authentication)) {
+            throw new AccessDeniedException("Notification-template administration is denied");
+        }
+        return ResponseEntity.ok(new NotificationTemplateAuthorizationResponse(actorUserId));
+    }
+
+    @PostMapping("/notification-delivery")
+    @Operation(summary = "Authorize notification delivery operations",
+            description = "Requires an active global Super Admin with the explicit NOTIFICATION_DELIVERY_MANAGE permission.")
+    public ResponseEntity<NotificationDeliveryAuthorizationResponse> authorizeNotificationDeliveryManagement(
+            Authentication authentication) {
+        UUID actorUserId = authorization.authenticatedUserId(authentication);
+        if (actorUserId == null || !authorization.canManageNotificationDelivery(authentication)) {
+            throw new AccessDeniedException("Notification-delivery management is denied");
+        }
+        return ResponseEntity.ok(new NotificationDeliveryAuthorizationResponse(actorUserId));
     }
 
     @PostMapping("/scheduling")

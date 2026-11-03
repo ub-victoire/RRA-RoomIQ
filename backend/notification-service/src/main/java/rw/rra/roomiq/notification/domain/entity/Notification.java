@@ -84,12 +84,17 @@ public class Notification {
 
     public Notification(UUID id, UUID recipientUserId, String eventType, String resourceType,
                         UUID resourceId, String payload, Instant createdAt, String status) {
+        this(id, recipientUserId, eventType, resourceType, resourceId, "IN_APP", payload, createdAt, status);
+    }
+
+    public Notification(UUID id, UUID recipientUserId, String eventType, String resourceType,
+                        UUID resourceId, String channel, String payload, Instant createdAt, String status) {
         this.id = id;
         this.recipientUserId = recipientUserId;
         this.eventType = eventType;
         this.resourceType = resourceType;
         this.resourceId = resourceId;
-        this.channel = "IN_APP";
+        this.channel = channel;
         this.payload = payload;
         this.createdAt = createdAt;
         this.status = status;
@@ -98,6 +103,7 @@ public class Notification {
     public UUID getId() { return id; }
     public UUID getRecipientUserId() { return recipientUserId; }
     public String getEventType() { return eventType; }
+    public UUID getNotificationTemplateId() { return notificationTemplateId; }
     public String getResourceType() { return resourceType; }
     public UUID getResourceId() { return resourceId; }
     public String getChannel() { return channel; }
@@ -107,6 +113,10 @@ public class Notification {
     public String getPayload() { return payload; }
     public Instant getReadAt() { return readAt; }
     public Instant getCreatedAt() { return createdAt; }
+
+    public void setNotificationTemplateId(UUID notificationTemplateId) {
+        this.notificationTemplateId = notificationTemplateId;
+    }
 
     public void markRead(Instant readAt) {
         if (readAt == null) {
@@ -130,5 +140,44 @@ public class Notification {
         status = "CANCELLED";
         scheduledAt = null;
         this.cancelledAt = cancelledAt;
+    }
+
+    public void markEmailSent() {
+        if (!"EMAIL".equals(channel) || !"PENDING".equals(status)) {
+            throw new IllegalStateException("Only a pending email notification can be marked sent");
+        }
+        status = "SENT";
+    }
+
+    public void scheduleEmailRetry(Instant retryAt) {
+        if (!"EMAIL".equals(channel) || !"PENDING".equals(status) || retryAt == null) {
+            throw new IllegalStateException("Only a pending email notification can be scheduled for retry");
+        }
+        status = "SCHEDULED";
+        scheduledAt = retryAt;
+    }
+
+    public void prepareScheduledEmailRetry() {
+        if (!"EMAIL".equals(channel) || !"SCHEDULED".equals(status) || scheduledAt == null) {
+            throw new IllegalStateException("Only a scheduled email retry can become pending");
+        }
+        status = "PENDING";
+        scheduledAt = null;
+    }
+
+    public void markEmailDeadLettered() {
+        if (!"EMAIL".equals(channel) || !"PENDING".equals(status)) {
+            throw new IllegalStateException("Only a pending email notification can be dead-lettered");
+        }
+        status = "DEAD_LETTER";
+        scheduledAt = null;
+    }
+
+    public void redriveEmail(Instant scheduledAt) {
+        if (!"EMAIL".equals(channel) || !"DEAD_LETTER".equals(status) || scheduledAt == null) {
+            throw new IllegalStateException("Only a dead-lettered email notification can be redriven");
+        }
+        status = "SCHEDULED";
+        this.scheduledAt = scheduledAt;
     }
 }

@@ -98,7 +98,8 @@ public class IdentitySecurityConfiguration {
                         "/actuator/health")
                         .permitAll()
                     .requestMatchers(HttpMethod.POST,
-                    "/api/v1/internal/notifications/recipient-resolution")
+                    "/api/v1/internal/notifications/recipient-resolution",
+                    "/api/v1/internal/notifications/delivery-contact")
                     .permitAll()
                     .anyRequest().authenticated())
                 .formLogin(form -> form.disable())

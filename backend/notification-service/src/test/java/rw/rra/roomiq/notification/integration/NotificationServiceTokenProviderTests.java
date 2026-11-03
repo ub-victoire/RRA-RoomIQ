@@ -58,6 +58,27 @@ class NotificationServiceTokenProviderTests {
     }
 
     @Test
+    void signsDeliveryContactTokenWithOnlyItsDedicatedPermission() throws Exception {
+        KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(2048);
+        KeyPair pair = generator.generateKeyPair();
+        ResourceLoader loader = mock(ResourceLoader.class);
+        when(loader.getResource("classpath:notification-private.pem"))
+                .thenReturn(new ByteArrayResource(privateKeyPem((RSAPrivateKey) pair.getPrivate())));
+        NotificationServiceTokenProvider provider = new NotificationServiceTokenProvider(
+                loader, "https://roomiq.example/identity",
+                NotificationServiceTokenProvider.AUDIENCE, "notification-key-01",
+                "classpath:notification-private.pem", Clock.systemUTC());
+        String authorization = provider.createAuthorizationHeader(NotificationServiceTokenProvider.EMAIL_PERMISSION);
+        JwtDecoder decoder = NimbusJwtDecoder.withPublicKey((RSAPublicKey) pair.getPublic())
+                .signatureAlgorithm(SignatureAlgorithm.RS256).build();
+
+        assertThat(decoder.decode(authorization.substring("Bearer ".length()))
+                .getClaimAsStringList("permissions"))
+                .containsExactly(NotificationServiceTokenProvider.EMAIL_PERMISSION);
+    }
+
+    @Test
     void refusesToSignWhenExternalServiceIdentityConfigurationIsIncomplete() {
         NotificationServiceTokenProvider provider = new NotificationServiceTokenProvider(
                 mock(ResourceLoader.class), "", NotificationServiceTokenProvider.AUDIENCE, "", "",

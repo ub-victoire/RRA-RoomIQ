@@ -100,11 +100,11 @@ class AuthenticationControllerTests {
                 .andReturn().getResponse().getContentAsString();
 
         Map<?, ?> paths = JsonPath.read(document, "$.paths");
-        assertThat(paths).hasSize(20);
+        assertThat(paths).hasSize(22);
         int operationCount = paths.values().stream()
                 .mapToInt(path -> ((Map<?, ?>) path).size())
                 .sum();
-        assertThat(operationCount).isEqualTo(28);
+        assertThat(operationCount).isEqualTo(30);
 
         Map<?, ?> schemes = JsonPath.read(document, "$.components.securitySchemes");
         assertThat(schemes.keySet().toString()).contains("bearerAuth");
@@ -151,6 +151,10 @@ class AuthenticationControllerTests {
                 "$.paths['/api/v1/internal/authorization/meeting'].post");
         assertThat(String.valueOf(meetingAuthorization.get("summary"))).contains("meeting");
         assertThat(String.valueOf(meetingAuthorization.get("security"))).contains("bearerAuth");
+        Map<?, ?> templateAuthorization = JsonPath.read(document,
+                "$.paths['/api/v1/internal/authorization/notification-templates'].post");
+        assertThat(String.valueOf(templateAuthorization.get("summary"))).contains("notification-template");
+        assertThat(String.valueOf(templateAuthorization.get("security"))).contains("bearerAuth");
     }
 
     @Test

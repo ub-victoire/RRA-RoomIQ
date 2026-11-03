@@ -61,6 +61,10 @@ public class NotificationEventCodec {
         this.objectMapper = objectMapper;
     }
 
+    public Set<String> supportedEventTypes() {
+        return EVENT_DEFINITIONS.keySet();
+    }
+
     public NotificationEvent decode(byte[] body) {
         if (body == null || body.length == 0) {
             throw new InvalidNotificationEventException("Notification event body is empty");

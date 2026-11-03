@@ -35,6 +35,7 @@ class NotificationServiceTokenVerifierTests {
     private static final String ISSUER = "https://roomiq.example/identity";
     private static final String AUDIENCE = "rra-roomiq-identity-recipient-resolution";
     private static final String PERMISSION = "notification:recipient-resolution";
+    private static final String EMAIL_PERMISSION = "notification:delivery-contact-resolution";
     private final ResourceLoader resourceLoader = mock(ResourceLoader.class);
     private final KeyPair keyPair = newKeyPair();
     private final NotificationServiceTokenVerifier verifier = new NotificationServiceTokenVerifier(
@@ -51,6 +52,20 @@ class NotificationServiceTokenVerifierTests {
     void acceptsShortLivedNotificationServiceTokenWithTheRequiredPermission() {
         verifier.verify("Bearer " + token(ISSUER, AUDIENCE, "notification-service", PERMISSION,
                 "notification-current", Instant.now(), Instant.now().plusSeconds(90)));
+    }
+
+    @Test
+    void deliveryContactResolutionRequiresItsDedicatedPermission() {
+        verifier.verify("Bearer " + token(ISSUER, AUDIENCE, "notification-service", EMAIL_PERMISSION,
+                "notification-current", Instant.now(), Instant.now().plusSeconds(90)),
+                EMAIL_PERMISSION);
+
+        assertThatThrownBy(() -> verifier.verify("Bearer " + token(ISSUER, AUDIENCE, "notification-service",
+                PERMISSION, "notification-current", Instant.now(), Instant.now().plusSeconds(90)),
+                EMAIL_PERMISSION))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> assertThat(((ResponseStatusException) exception).getStatusCode())
+                        .isEqualTo(HttpStatus.FORBIDDEN));
     }
 
     @Test

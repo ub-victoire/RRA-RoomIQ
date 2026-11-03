@@ -15,6 +15,8 @@ This service owns the identity and authorization domain for the RRA RoomIQ platf
 - authorization and access scope decisions
 - audit-facing identity events
 
+Notification Service delegates operational access checks to Identity. The hidden contact-resolution endpoint returns only the stored email for an active account to a short-lived service token with the dedicated `notification:delivery-contact-resolution` permission. The bearer-protected `/api/v1/internal/authorization/notification-delivery` decision permits delivery health, dead-letter inspection, and redrive only to an active global Super Admin assigned the explicit `NOTIFICATION_DELIVERY_MANAGE` permission. Flyway V4 adds that permission to the catalog but does not assign it to a role automatically.
+
 ## Technology stack
 
 - Java 25

@@ -3,6 +3,7 @@ package rw.rra.roomiq.identity.domain.repository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
+import rw.rra.roomiq.identity.domain.entity.UserStatus;
 import rw.rra.roomiq.identity.domain.entity.UserRole;
 
 import java.util.List;
@@ -30,4 +31,17 @@ public interface IdentityAuthorizationRepository extends Repository<UserRole, UU
             "and assignment.scopeOfficeBuildingId is not null")
     List<UUID> findAuthorizedBuildingScopes(@Param("userId") UUID userId,
                                             @Param("permissionCode") String permissionCode);
+
+    @Query("select case when count(assignment) > 0 then true else false end " +
+            "from UserRole assignment, RolePermission rolePermission " +
+            "join rolePermission.permission permission " +
+            "where assignment.user.id = :userId " +
+            "and assignment.user.status = :activeStatus " +
+            "and assignment.role.id = rolePermission.role.id " +
+            "and assignment.role.code = 'SUPER_ADMIN' " +
+            "and assignment.scopeOfficeBuildingId is null " +
+            "and permission.code = :permissionCode")
+    boolean isActiveSuperAdminWithPermission(@Param("userId") UUID userId,
+                                             @Param("activeStatus") UserStatus activeStatus,
+                                             @Param("permissionCode") String permissionCode);
 }

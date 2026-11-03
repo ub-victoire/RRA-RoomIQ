@@ -26,7 +26,7 @@ import java.util.UUID;
 @Component
 public class NotificationServiceTokenVerifier {
     private static final String REQUIRED_SUBJECT = "notification-service";
-    private static final String REQUIRED_PERMISSION = "notification:recipient-resolution";
+    private static final String RECIPIENT_RESOLUTION_PERMISSION = "notification:recipient-resolution";
     private static final Duration MAX_TOKEN_LIFETIME = Duration.ofMinutes(2);
 
     private final ResourceLoader resourceLoader;
@@ -55,6 +55,10 @@ public class NotificationServiceTokenVerifier {
     }
 
     public void verify(String authorizationHeader) {
+        verify(authorizationHeader, RECIPIENT_RESOLUTION_PERMISSION);
+    }
+
+    public void verify(String authorizationHeader, String requiredPermission) {
         if (issuer.isBlank() || audience.isBlank() || currentKeyId.isBlank()
                 || currentPublicKeyLocation.isBlank()) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
@@ -92,9 +96,9 @@ public class NotificationServiceTokenVerifier {
             throw unauthorized();
         }
         Object permissions = jwt.getClaims().get("permissions");
-        if (!(permissions instanceof List<?> values) || !values.contains(REQUIRED_PERMISSION)) {
+        if (!(permissions instanceof List<?> values) || !values.contains(requiredPermission)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Notification service lacks recipient-resolution permission");
+                    "Notification service lacks the required permission");
         }
     }
 
