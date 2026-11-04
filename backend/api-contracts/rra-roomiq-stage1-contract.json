@@ -3,7 +3,7 @@
   "project": "RRA RoomIQ",
   "stage": "Stage 8",
   "status": "stage-8-checklist-approved",
-  "stageStatusReason": "Stage 7 was accepted by the user after S7-01 through S7-08 passed their verification gates. The user approved the Stage 8 Audit Service checklist and selected audit-search authorization: global Super Admins and building-scoped Admins use a dedicated AUDIT_READ permission, with scoped access limited to assigned buildings. No S8 item has implementation authorization or acceptance. Pre-existing foundations include the Identity transactional outbox and the S7 Notification template-audit consumer; the latter does not consume Identity events. AUDIT_READ, Audit search, verified append-only protection, and retention processing are not implemented. S8-06 remains blocked pending RRA policy. Stage 7 production SMTP remains disabled until RRA provisions the approved relay and organization-controlled sender. Notification inbox, template, delivery operations, and hidden Identity contact-resolution routes are not exposed through the API Gateway. Stage 7 event schema, delivery, template, and audit routing contracts are recorded under stage7Progress. Source identity in broker payloads is a body claim; production RabbitMQ credentials and routing-key ACLs remain deployment verification.",
+  "stageStatusReason": "Stage 7 was accepted by the user after S7-01 through S7-08 passed their verification gates. The user approved the Stage 8 Audit Service checklist and selected audit-search authorization: global Super Admins and building-scoped Admins use a dedicated AUDIT_READ permission, with scoped access limited to assigned buildings. S8-01 and S8-02 are accepted; S8-03 is implemented and verified subject to production DBA provisioning; S8-04 is implemented and verified; S8-05 is complete and full-reactor verified. Audit consumes the accepted Identity and Notification event paths, provides the authorized Search API, and applies append-only controls. RRA-provided proposed retention guidance is documented under stage8Progress; formal approval and final operational authorization remain unconfirmed, so S8-06 is blocked and no retention/archive/legal-hold/disposal processing is implemented. S8-07 remains partially verified and blocked on S8-06. Stage 7 production SMTP remains disabled until RRA provisions the approved relay and organization-controlled sender. Notification inbox, template, delivery operations, and hidden Identity contact-resolution routes are not exposed through the API Gateway. Stage 7 event schema, delivery, template, and audit routing contracts are recorded under stage7Progress. Source identity in broker payloads is a body claim; production RabbitMQ credentials and routing-key ACLs remain deployment verification.",
   "stage2Progress": {
     "S2-01": {
       "name": "Identity schema migration",
@@ -1742,20 +1742,20 @@
       "S8-03": "Persist and deduplicate through the approved AUDIT_EVENT schema; reject conflicting event-ID reuse and establish/test an explicit append-only integrity mechanism.",
       "S8-04": "Preserve approved actor/action/resource/scope/outcome/time, correlation and available causation data while redacting sensitive values; present any schema gap for approval.",
       "S8-05": "Provide protected, validated, paginated/filterable audit search under AUDIT_READ for global Super Admins and assigned-building-scoped Admins; enforce scope in queries and prevent privacy leaks.",
-      "S8-06": "Apply retention/archive/legal-hold/disposal only after RRA approves the complete policy; currently blocked.",
+      "S8-06": "RRA-provided proposed retention guidance is documented in Documentation.md. Formal policy approval and final operational authorization remain unconfirmed; no retention/archive/legal-hold/disposal behavior is implemented.",
       "S8-07": "Complete focused security/integration/observability/documentation evidence and per-item Identity, common-web, and full-reactor regressions."
     },
     "existingImplementation": {
-      "auditService": "Existing code validates and idempotently persists three Notification template-administration event types through a durable queue. It has no Audit-side Identity queue/listener, search API, retention processing, or verified append-only/tamper-resistance control.",
-      "identity": "A transactional identity_audit_outbox producer exists, but its events are not consumed by an Audit Service listener.",
-      "permission": "AUDIT_READ is an approved policy but is absent from IdentityPermissionCodes and Identity migrations.",
-      "schema": "The current Audit V1 migration maps the existing AUDIT_EVENT ERD fields. It contains no trigger/immutability control or secondary index; no Stage 8 schema change is approved."
+      "auditService": "Audit consumes the approved Notification template-audit and Identity v1 audit-outbox paths and idempotently persists supported events in its own database. It implements the frozen authorized Audit Search API and append-only repository/ORM/database/runtime-role controls. It has no retention, archive, legal-hold, or disposal processing.",
+      "identity": "Identity emits supported events through its transactional identity_audit_outbox; Audit consumes the approved v1 event path.",
+      "permission": "AUDIT_READ is in the Identity permission catalog and is not automatically granted to a role.",
+      "schema": "Audit V1 maps the approved AUDIT_EVENT facts; S8-03 adds append-only triggers in V2. The schema has no retention category, policy/version, archive, legal-hold, or disposal state. No such schema change is approved."
     },
+    "s8-06Guidance": "RRA-provided retention categories, proposed periods, and start points are recorded in Documentation.md under S8-06 with current RoomIQ record mapping. The supplied guidance does not establish formal approval or final operational authorization.",
     "openDecisions": [
-      "RRA retention duration(s) and start point, archive destination/format/protection/access, legal-hold requirement/authority/release, disposal or deletion process/authorization, and applicable RRA/regulatory approvals",
-      "Append-only/tamper-resistance enforcement mechanism; current application repository and migration do not establish it",
-      "Whether source service and causation identifiers must be persisted/searchable; approved AUDIT_EVENT schema has correlation_id only",
-      "Audit search filters/sorts, response field allowlist, pagination bounds, and whether a new Identity internal authorization contract is needed"
+      "Formal approval status and effective date for RRA-provided proposed retention guidance; approved selection for proposed ranges; applicable-law references and statutory start events; separately approved backup lifecycle; archive destination/format/encryption/access/ownership and integrity/recovery controls; legal-hold requirement/authority/release/conflict rules; disposal/anonymization authorization and evidence; and applicable RRA/regulatory approvals",
+      "Production DBA provisioning for the non-owner Audit runtime role; controls do not protect against table-owner/superuser bypass and are not cryptographic tamper evidence",
+      "Whether source service and causation identifiers must be persisted/searchable; the approved AUDIT_EVENT schema has correlation_id only"
     ],
     "approvedDecisions": [
       "Audit search: global Super Admins and building-scoped Admins must hold the dedicated AUDIT_READ permission; scoped Admins are restricted to assigned building scopes",
