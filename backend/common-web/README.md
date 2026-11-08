@@ -13,7 +13,7 @@ Shared HTTP conventions consumed by every backend service.
 - `CorrelationIdFilter` validates, accepts, or creates `X-Correlation-ID` and propagates the same value through request state, MDC, and response headers.
 - `RoomIqWebConfiguration` supplies OpenAPI defaults and registers shared web components.
 - `logback-spring.xml` defines the shared console format with correlation IDs.
-- Room Service S4-11/S4-12 and Scheduling S5 APIs use the shared `ApiResponse<T>`, `ApiError`, Bean Validation, and correlation-ID conventions. Scheduling business routes, including recurrence, constraints, and availability, require server-side bearer/Identity authorization; they are not routed through the API Gateway in Stage 5. OpenAPI documents the contract but does not publish the route. Scheduling and full-reactor Java regression gates pass.
+- Room Service S4-11/S4-12 and Scheduling S5-02/S5-03 APIs use the shared `ApiResponse<T>`, `ApiError`, Bean Validation, and correlation-ID conventions. Scheduling calendar, window, holiday, and closure operations also document bearer security and stable validation, authorization, conflict, and dependency errors. The Scheduling and full-reactor Java test gates passed.
 
 Each service adds this module as a Maven dependency and may extend the conventions with domain-specific controllers and DTOs.
 
