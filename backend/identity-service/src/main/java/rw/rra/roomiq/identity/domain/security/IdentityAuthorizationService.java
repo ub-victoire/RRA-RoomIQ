@@ -43,6 +43,7 @@ import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.ROO
 import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.NOTIFICATION_TEMPLATE_MANAGE;
 import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.NOTIFICATION_DELIVERY_MANAGE;
 import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.AUDIT_READ;
+import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.RETENTION_POLICY_MANAGE;
 
 @Service("identityAuthorization")
 @Transactional(readOnly = true)
@@ -673,6 +674,12 @@ public class IdentityAuthorizationService {
         UUID userId = actorId(authentication);
         return userId != null && authorization.isActiveSuperAdminWithPermission(userId,
                 UserStatus.ACTIVE, NOTIFICATION_DELIVERY_MANAGE);
+    }
+
+    public boolean canManageRetentionPolicies(Authentication authentication) {
+        UUID userId = actorId(authentication);
+        return userId != null && authorization.isActiveSuperAdminWithPermission(userId,
+                UserStatus.ACTIVE, RETENTION_POLICY_MANAGE);
     }
 
     public Optional<AuditSearchAuthorizationResponse> auditSearchAuthorization(

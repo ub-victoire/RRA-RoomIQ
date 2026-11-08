@@ -19,6 +19,7 @@ import rw.rra.roomiq.identity.domain.dto.MeetingAuthorizationRequest;
 import rw.rra.roomiq.identity.domain.dto.MeetingAuthorizationResponse;
 import rw.rra.roomiq.identity.domain.dto.NotificationTemplateAuthorizationResponse;
 import rw.rra.roomiq.identity.domain.dto.NotificationDeliveryAuthorizationResponse;
+import rw.rra.roomiq.identity.domain.dto.RetentionPolicyAuthorizationResponse;
 import rw.rra.roomiq.identity.domain.dto.RoomManagementAuthorizationRequest;
 import rw.rra.roomiq.identity.domain.dto.RoomManagementAuthorizationResponse;
 import rw.rra.roomiq.identity.domain.dto.SchedulingAuthorizationRequest;
@@ -163,6 +164,18 @@ public class OrganizationAuthorizationController {
             throw new AccessDeniedException("Notification-delivery management is denied");
         }
         return ResponseEntity.ok(new NotificationDeliveryAuthorizationResponse(actorUserId));
+    }
+
+    @PostMapping("/retention-policy")
+    @Operation(summary = "Authorize retention-policy management",
+            description = "Requires the authenticated active user to hold the global SUPER_ADMIN role and explicit RETENTION_POLICY_MANAGE permission.")
+    public ResponseEntity<RetentionPolicyAuthorizationResponse> authorizeRetentionPolicyManagement(
+            Authentication authentication) {
+        UUID actorUserId = authorization.authenticatedUserId(authentication);
+        if (actorUserId == null || !authorization.canManageRetentionPolicies(authentication)) {
+            throw new AccessDeniedException("Retention policy management is denied");
+        }
+        return ResponseEntity.ok(new RetentionPolicyAuthorizationResponse(actorUserId));
     }
 
     @PostMapping("/audit-search")

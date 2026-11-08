@@ -209,6 +209,38 @@ class OrganizationAuthorizationControllerTests {
                 .andExpect(status().isForbidden());
     }
 
+    @Test
+    void retentionPolicyManagementRequiresItsOwnPermissionAndGlobalSuperAdminScope() throws Exception {
+        AppUser superAdmin = createUser("retention-super-admin@rra.rw", UserStatus.ACTIVE);
+        Role superAdminRole = roles.findByCodeIgnoreCase("SUPER_ADMIN")
+                .orElseGet(() -> roles.saveAndFlush(new Role("SUPER_ADMIN", "Super Admin", true)));
+        Permission permission = permissions.findByCodeIgnoreCase(
+                IdentityPermissionCodes.RETENTION_POLICY_MANAGE).orElseThrow();
+        rolePermissions.saveAndFlush(new RolePermission(superAdminRole, permission));
+        userRoles.saveAndFlush(new UserRole(superAdmin, superAdminRole, null, null));
+
+        mockMvc.perform(post("/api/v1/internal/authorization/retention-policy")
+                        .with(jwt().jwt(token -> token.subject(superAdmin.getId().toString()))))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .jsonPath("$.actorUserId").value(superAdmin.getId().toString()));
+
+        AppUser withoutPermission = createUser("retention-no-permission@rra.rw", UserStatus.ACTIVE);
+        Role unprivilegedRole = roles.saveAndFlush(
+                new Role("SUPER_ADMIN_NO_RETENTION_PERMISSION", "Super Admin Without Retention Permission", true));
+        userRoles.saveAndFlush(new UserRole(withoutPermission, unprivilegedRole, null, null));
+        mockMvc.perform(post("/api/v1/internal/authorization/retention-policy")
+                        .with(jwt().jwt(token -> token.subject(withoutPermission.getId().toString()))
+                                .authorities(new SimpleGrantedAuthority(SYSTEM_ADMIN))))
+                .andExpect(status().isForbidden());
+
+        AppUser inactive = createUser("retention-inactive@rra.rw", UserStatus.SUSPENDED);
+        userRoles.saveAndFlush(new UserRole(inactive, superAdminRole, null, null));
+        mockMvc.perform(post("/api/v1/internal/authorization/retention-policy")
+                        .with(jwt().jwt(token -> token.subject(inactive.getId().toString()))))
+                .andExpect(status().isForbidden());
+    }
+
     private AppUser createUser(String email, UserStatus status) {
         AppUser user = new AppUser(email, "Organization Authorization Test", status);
         return users.saveAndFlush(user);

@@ -1,5 +1,7 @@
 package rw.rra.roomiq.room.domain.service;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
@@ -32,19 +34,30 @@ public class RoomEventOutboxRelay {
     private final RabbitTemplate rabbitTemplate;
     private final long confirmTimeoutMillis;
     private final Clock clock;
+    private final Counter confirmedEvents;
+    private final Counter deferredEvents;
 
     @Autowired
     public RoomEventOutboxRelay(RoomEventOutboxRepository repository, RabbitTemplate rabbitTemplate,
+                                MeterRegistry meterRegistry,
                                 @Value("${room.events.relay.confirm-timeout-ms:3000}") long confirmTimeoutMillis) {
-        this(repository, rabbitTemplate, confirmTimeoutMillis, Clock.systemUTC());
+        this(repository, rabbitTemplate, meterRegistry, confirmTimeoutMillis, Clock.systemUTC());
     }
 
-    RoomEventOutboxRelay(RoomEventOutboxRepository repository, RabbitTemplate rabbitTemplate,
+    RoomEventOutboxRelay(RoomEventOutboxRepository repository, RabbitTemplate rabbitTemplate, MeterRegistry meterRegistry,
                          long confirmTimeoutMillis, Clock clock) {
         this.repository = repository;
         this.rabbitTemplate = rabbitTemplate;
         this.confirmTimeoutMillis = confirmTimeoutMillis;
         this.clock = clock;
+        this.confirmedEvents = Counter.builder("roomiq.room.outbox.delivery")
+                .description("Room outbox events acknowledged and routed by the broker")
+                .tag("outcome", "confirmed")
+                .register(meterRegistry);
+        this.deferredEvents = Counter.builder("roomiq.room.outbox.delivery")
+                .description("Room outbox events retained for retry after delivery failure")
+                .tag("outcome", "deferred")
+                .register(meterRegistry);
     }
 
     @Scheduled(fixedDelayString = "${room.events.relay.fixed-delay-ms:1000}")
@@ -55,6 +68,7 @@ public class RoomEventOutboxRelay {
             try {
                 publish(entry);
                 entry.markPublished(clock.instant());
+                confirmedEvents.increment();
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
                 defer(entry, exception, now);
@@ -95,6 +109,7 @@ public class RoomEventOutboxRelay {
     private void defer(RoomEventOutboxEntry entry, Exception exception, Instant now) {
         entry.deferUntil(now.plusSeconds(retryDelaySeconds(entry.getAttemptCount())),
                 exception.getClass().getName());
+        deferredEvents.increment();
         if (entry.getAttemptCount() >= OPERATIONAL_ALERT_ATTEMPT) {
             log.error("Room event repeatedly failed delivery eventId={} eventType={} attemptCount={} failureType={}",
                     entry.getEventId(), entry.getEventType(), entry.getAttemptCount(), entry.getLastError());

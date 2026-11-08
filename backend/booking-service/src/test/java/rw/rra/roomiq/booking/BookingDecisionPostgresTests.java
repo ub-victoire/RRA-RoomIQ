@@ -209,6 +209,72 @@ class BookingDecisionPostgresTests {
     }
 
     @Test
+    void secretaryRequestSubmissionAndAdminApprovalPersistTheCompleteBookingWorkflow() {
+        UUID requesterId = UUID.randomUUID();
+        UUID reviewerId = UUID.randomUUID();
+        UUID departmentId = UUID.randomUUID();
+        UUID roomId = UUID.randomUUID();
+        UUID buildingId = UUID.randomUUID();
+        CreateBookingRequest request = new CreateBookingRequest(departmentId, roomId, buildingId,
+                null, "Workflow integration", "Cross-service verified booking", START, END, 4, false);
+        when(authorizationClient.authorizeCurrentCaller(any(BookingAuthorizationRequest.class)))
+                .thenReturn(requesterId);
+        when(ownerServicesClient.validateRequest(any(BookingRequestFacts.class), eq(TOKEN), any(Instant.class)))
+                .thenAnswer(invocation -> references(invocation.getArgument(0), 15));
+
+        var draft = bookingRequestService.create(request, "workflow-" + UUID.randomUUID());
+        assertThat(draft.status()).isEqualTo(BookingRequestStatus.DRAFT);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM booking_event_outbox
+                WHERE event_type = 'BookingRequested' AND aggregate_id = ?
+                """, Integer.class, draft.id())).isZero();
+
+        var submitted = bookingRequestService.submit(draft.id());
+        assertThat(submitted.status()).isEqualTo(BookingRequestStatus.PENDING_APPROVAL);
+        String requestEvent = jdbcTemplate.queryForObject("""
+                SELECT payload::text FROM booking_event_outbox
+                WHERE event_type = 'BookingRequested' AND aggregate_id = ?
+                """, String.class, draft.id());
+        assertThat(requestEvent).contains(requesterId.toString(), departmentId.toString(), roomId.toString(),
+                "SCOPED_ADMIN_REQUEST");
+
+        when(authorizationClient.authorizeApproval(requesterId, buildingId))
+                .thenReturn(new BookingAuthorizationResponse(reviewerId, requesterId, "Trusted requester"));
+        var decision = decisionService.decide(draft.id(),
+                new BookingDecisionRequest(ApprovalDecisionType.APPROVED, "Approved in workflow test"));
+
+        assertThat(decision.requestStatus()).isEqualTo(BookingRequestStatus.APPROVED);
+        assertThat(decision.decidedByUserId()).isEqualTo(reviewerId);
+        assertThat(decision.decidedByUserId()).isNotEqualTo(requesterId);
+        assertThat(bookingRequests.findById(draft.id()).orElseThrow().getStatus())
+                .isEqualTo(BookingRequestStatus.APPROVED);
+        Reservation reservation = reservations.findById(decision.reservationId()).orElseThrow();
+        assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
+        assertThat(reservation.getOrganizerUserId()).isEqualTo(requesterId);
+        Meeting meeting = meetings.findById(decision.meetingId()).orElseThrow();
+        assertThat(meeting.getReservation().getId()).isEqualTo(reservation.getId());
+        assertThat(meeting.getVisibility()).isEqualTo(MeetingVisibility.PRIVATE);
+        assertThat(participants.findAll()).filteredOn(participant -> participant.getMeeting().getId()
+                .equals(meeting.getId())).singleElement().satisfies(organizer -> {
+                    assertThat(organizer.getUserId()).isEqualTo(requesterId);
+                    assertThat(organizer.getRole()).isEqualTo(ParticipantRole.ORGANIZER);
+                    assertThat(organizer.getInviteStatus()).isEqualTo(InviteStatus.ACCEPTED);
+                });
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM booking_event_outbox
+                WHERE event_type = 'BookingApproved' AND aggregate_id = ?
+                """, Integer.class, draft.id())).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM booking_event_outbox
+                WHERE event_type = 'booking.occupancy.changed' AND aggregate_id = ?
+                """, Integer.class, reservation.getId())).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM booking_event_outbox
+                WHERE event_type = 'Reminder' AND aggregate_id = ?
+                """, Integer.class, meeting.getId())).isEqualTo(2);
+    }
+
+    @Test
     void approvalCommitsDecisionRequestReservationMeetingAndRequesterOrganizerTogether() {
         BookingRequest request = pendingRequest(UUID.randomUUID(), UUID.randomUUID(), START, END);
         configureAuthorization(request, UUID.randomUUID());

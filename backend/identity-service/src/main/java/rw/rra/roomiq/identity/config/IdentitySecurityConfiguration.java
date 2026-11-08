@@ -80,7 +80,7 @@ public class IdentitySecurityConfiguration {
             }
         };
         decoder.setJwtValidator(new org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator<>(
-                JwtValidators.createDefault(), sessionValidator));
+                JwtValidators.createDefaultWithIssuer("rra-roomiq-identity"), sessionValidator));
         return decoder;
     }
 

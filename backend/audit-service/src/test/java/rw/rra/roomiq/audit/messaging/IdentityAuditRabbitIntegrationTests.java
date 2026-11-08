@@ -8,6 +8,7 @@ import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
@@ -15,9 +16,17 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.rabbitmq.RabbitMQContainer;
 import rw.rra.roomiq.audit.domain.AuditEventRepository;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -27,7 +36,7 @@ import static org.awaitility.Awaitility.await;
         "spring.flyway.enabled=true",
         "spring.jpa.hibernate.ddl-auto=validate",
         "roomiq.auth.jwt-secret=test-only-signing-key-at-least-32-bytes-long",
-        "roomiq.audit.notification.events.enabled=false",
+        "roomiq.audit.notification.events.enabled=true",
         "roomiq.audit.identity.events.enabled=true",
         "spring.rabbitmq.listener.simple.retry.max-attempts=3",
         "spring.rabbitmq.listener.simple.retry.initial-interval=20ms",
@@ -65,10 +74,20 @@ class IdentityAuditRabbitIntegrationTests {
     @Autowired
     private AuditEventRepository repository;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    private final HttpClient rabbitManagementClient = HttpClient.newHttpClient();
+
     @org.junit.jupiter.api.BeforeEach
     void clearQueues() {
         rabbitAdmin.purgeQueue(IdentityAuditMessagingConfiguration.QUEUE);
         rabbitAdmin.purgeQueue(IdentityAuditMessagingConfiguration.DEAD_LETTER_QUEUE);
+        rabbitAdmin.purgeQueue(AuditMessagingConfiguration.QUEUE);
+        rabbitAdmin.purgeQueue(AuditMessagingConfiguration.DEAD_LETTER_QUEUE);
     }
 
     @Test
@@ -107,22 +126,93 @@ class IdentityAuditRabbitIntegrationTests {
         send(IdentityAuditMessagingConfiguration.ROUTING_KEY, eventId, eventJson(eventId, "identity-service",
                 "UNAPPROVED_EVENT", "USER", "SUCCESS", quote(UUID.randomUUID()), quote(UUID.randomUUID()),
                 "null", "{}"));
-        awaitDeadLetter();
+        awaitDeadLetter(IdentityAuditMessagingConfiguration.DEAD_LETTER_QUEUE);
         assertThat(repository.findById(eventId)).isEmpty();
 
         UUID wrongRouteEventId = UUID.randomUUID();
         send(IdentityAuditMessagingConfiguration.QUEUE, wrongRouteEventId, eventJson(wrongRouteEventId,
                 "identity-service", "AUTHENTICATION_FAILED", "AUTHENTICATION", "DENIED",
                 "null", "null", "null", "{}"), "");
-        awaitDeadLetter();
+        awaitDeadLetter(IdentityAuditMessagingConfiguration.DEAD_LETTER_QUEUE);
         assertThat(repository.findById(wrongRouteEventId)).isEmpty();
     }
 
-    private void awaitDeadLetter() {
+    @Test
+    void notificationAuditCommitsBeforeAcknowledgementAndDeadLettersUnsupportedEvents() {
+        UUID eventId = UUID.randomUUID();
+        send(AuditMessagingConfiguration.ROUTING_KEY, eventId, notificationEventJson(eventId,
+                "NotificationTemplateCreated"));
+
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            assertThat(repository.findById(eventId)).isPresent();
+            assertThat(rabbitAdmin.getQueueInfo(AuditMessagingConfiguration.QUEUE).getMessageCount())
+                    .isZero();
+        });
+        assertThat(rabbitAdmin.getQueueInfo(AuditMessagingConfiguration.DEAD_LETTER_QUEUE).getMessageCount())
+                .isZero();
+
+        UUID unsupportedEventId = UUID.randomUUID();
+        send(AuditMessagingConfiguration.ROUTING_KEY, unsupportedEventId,
+                notificationEventJson(unsupportedEventId, "NotificationTemplateDeleted"));
+        awaitDeadLetter(AuditMessagingConfiguration.DEAD_LETTER_QUEUE);
+        assertThat(repository.findById(unsupportedEventId)).isEmpty();
+    }
+
+    @Test
+    void duplicateNotificationDeliveryAfterAcknowledgementPersistsOneAuditRecord() throws Exception {
+        UUID eventId = UUID.randomUUID();
+        String payload = notificationEventJson(eventId, "NotificationTemplateCreated");
+
+        send(AuditMessagingConfiguration.ROUTING_KEY, eventId, payload);
+        awaitNotificationEventPersistedAndAcknowledged(eventId);
+        assertThat(queueStatus(AuditMessagingConfiguration.DEAD_LETTER_QUEUE)
+                .path("messages_ready").asInt(-1)).isZero();
+        assertThat(auditEventCount(eventId)).isEqualTo(1L);
+
+        send(AuditMessagingConfiguration.ROUTING_KEY, eventId, payload);
+        awaitNotificationEventPersistedAndAcknowledged(eventId);
+
+        assertThat(auditEventCount(eventId)).isEqualTo(1L);
+        assertThat(queueStatus(AuditMessagingConfiguration.DEAD_LETTER_QUEUE)
+                .path("messages_ready").asInt(-1)).isZero();
+        assertThat(queueStatus(AuditMessagingConfiguration.DEAD_LETTER_QUEUE)
+                .path("messages_unacknowledged").asInt(-1)).isZero();
+    }
+
+    private void awaitNotificationEventPersistedAndAcknowledged(UUID eventId) {
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            assertThat(auditEventCount(eventId)).isEqualTo(1L);
+            assertThat(queueStatus(AuditMessagingConfiguration.QUEUE)
+                    .path("messages_ready").asInt(-1)).isZero();
+            assertThat(queueStatus(AuditMessagingConfiguration.QUEUE)
+                    .path("messages_unacknowledged").asInt(-1)).isZero();
+        });
+    }
+
+    private long auditEventCount(UUID eventId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_event WHERE id = ?", Long.class, eventId);
+    }
+
+    private JsonNode queueStatus(String queue) throws IOException, InterruptedException {
+        String credentials = rabbit.getAdminUsername() + ":" + rabbit.getAdminPassword();
+        String authorization = Base64.getEncoder()
+                .encodeToString(credentials.getBytes(StandardCharsets.UTF_8));
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://" + rabbit.getHost() + ":"
+                        + rabbit.getHttpPort() + "/api/queues/%2F/" + queue))
+                .header("Authorization", "Basic " + authorization)
+                .GET()
+                .build();
+        HttpResponse<String> response = rabbitManagementClient.send(request, HttpResponse.BodyHandlers.ofString());
+        assertThat(response.statusCode()).isEqualTo(200);
+        return objectMapper.readTree(response.body());
+    }
+
+    private void awaitDeadLetter(String deadLetterQueue) {
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
-                assertThat(rabbitAdmin.getQueueInfo(IdentityAuditMessagingConfiguration.DEAD_LETTER_QUEUE)
+                assertThat(rabbitAdmin.getQueueInfo(deadLetterQueue)
                         .getMessageCount()).isGreaterThan(0));
-        Message deadLetter = rabbitTemplate.receive(IdentityAuditMessagingConfiguration.DEAD_LETTER_QUEUE);
+        Message deadLetter = rabbitTemplate.receive(deadLetterQueue);
         assertThat(deadLetter).isNotNull();
     }
 
@@ -162,5 +252,27 @@ class IdentityAuditRabbitIntegrationTests {
 
     private static String quote(UUID value) {
         return "\"" + value + "\"";
+    }
+
+    private static String notificationEventJson(UUID eventId, String eventType) {
+        return """
+                {
+                  "eventId":"%s",
+                  "schemaVersion":1,
+                  "eventType":"%s",
+                  "timestamp":"2026-11-03T07:00:00Z",
+                  "sourceService":"notification-service",
+                  "actorUserId":"%s",
+                  "resourceType":"NOTIFICATION_TEMPLATE",
+                  "resourceId":"%s",
+                  "correlationId":"notification-correlation",
+                  "metadata":{
+                    "code":"BookingApproved",
+                    "version":2,
+                    "channel":"IN_APP",
+                    "changedFields":["code","version"]
+                  }
+                }
+                """.formatted(eventId, eventType, UUID.randomUUID(), UUID.randomUUID());
     }
 }

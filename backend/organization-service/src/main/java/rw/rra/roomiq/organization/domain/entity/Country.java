@@ -5,6 +5,8 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 
@@ -17,6 +19,7 @@ public class Country extends OrganizationEntity {
     @Column(nullable = false, length = 150)
     private String name;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "iso_code", length = 2, columnDefinition = "CHAR(2)")
     private String isoCode;
 

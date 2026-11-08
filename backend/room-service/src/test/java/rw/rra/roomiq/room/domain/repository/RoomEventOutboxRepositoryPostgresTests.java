@@ -105,6 +105,29 @@ class RoomEventOutboxRepositoryPostgresTests {
     }
 
     @Test
+    void rolledBackClaimLeavesUnpublishedEventAvailableToAnotherWorker() throws SQLException {
+        Instant now = Instant.now();
+        UUID eventId = UUID.randomUUID();
+        PGobject payload = new PGobject();
+        payload.setType("jsonb");
+        payload.setValue("{\"eventId\":\"" + eventId + "\"}");
+        repository.saveAndFlush(new RoomEventOutboxEntry(eventId, "RoomStatusChanged", 1, "ROOM",
+                UUID.randomUUID(), 1, payload, now, now));
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+
+        List<?> interruptedClaim = transaction.execute(status -> {
+            List<RoomEventOutboxEntry> claimed = repository.claimDue(now);
+            status.setRollbackOnly();
+            return claimed;
+        });
+        List<RoomEventOutboxEntry> subsequentClaim = transaction.execute(status -> repository.claimDue(now));
+
+        assertThat(interruptedClaim).hasSize(1);
+        assertThat(subsequentClaim).extracting(RoomEventOutboxEntry::getEventId).containsExactly(eventId);
+        assertThat(subsequentClaim.getFirst().getPublishedAt()).isNull();
+    }
+
+    @Test
     void eventWritesRemainServiceLocalWithoutForeignKeys() throws SQLException {
         UUID eventId = UUID.randomUUID();
         PGobject payload = new PGobject();

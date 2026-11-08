@@ -39,11 +39,13 @@ The service reads environment values externally via Spring config import from `.
 - DB_URL
 - DB_USERNAME
 - DB_PASSWORD
+- RABBITMQ_USERNAME
+- RABBITMQ_PASSWORD
 - SERVER_PORT
 - JWT_SECRET
 - additional service and external integration values as needed
 
-The local database is configured for PostgreSQL by default and uses a safe development fallback while the application is initialized.
+The local database is configured for PostgreSQL by default. `DB_PASSWORD` and the RabbitMQ credentials have no built-in credential fallback; configure them in `.env`. The example environment file contains placeholders that must be replaced.
 
 ## Stage 1 foundation summary
 
@@ -104,7 +106,7 @@ Passwords are encoded with BCrypt work factor 12 before persistence and are neve
 
 ### S2-09 Authentication: complete
 
-The identity service implements `POST /api/v1/auth/login`, `/refresh`, and `/logout`. Login uses a generic unauthorized response for missing users, bad passwords, or non-active accounts and performs a dummy BCrypt check for unknown users. Access tokens are HS256 JWTs with a 15-minute lifetime; opaque refresh tokens are generated from cryptographic randomness, stored only as SHA-256 hashes, and rotated on refresh. Logout revokes the refresh session, and every access JWT is checked against its active, unexpired session so logout immediately disables it. Refresh replay/expired tokens are rejected. `JWT_SECRET` is mandatory and must contain at least 32 bytes; it has no production fallback.
+The identity service implements `POST /api/v1/auth/login`, `/refresh`, and `/logout`. Login uses a generic unauthorized response for missing users, bad passwords, or non-active accounts and performs a dummy BCrypt check for unknown users. Access tokens are HS256 JWTs with a 15-minute lifetime; the decoder validates signature, expiration, and the issuer emitted by Identity, then checks the active, unexpired session so logout or account deactivation immediately disables the token. Opaque refresh tokens are generated from cryptographic randomness, stored only as SHA-256 hashes, and rotated on refresh; refresh replay/expired tokens are rejected. An audience claim is not defined by the current end-user token contract. `JWT_SECRET` is mandatory and must contain at least 32 bytes; it has no production fallback.
 
 ### S2-10 Session management: complete
 

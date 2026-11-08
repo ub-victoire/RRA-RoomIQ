@@ -44,6 +44,7 @@
         <module>booking-service</module>
         <module>notification-service</module>
         <module>audit-service</module>
+        <module>records-lifecycle-service</module>
         <module>analytics-service</module>
     </modules>
 </project>

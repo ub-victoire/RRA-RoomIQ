@@ -1,5 +1,6 @@
 package rw.rra.roomiq.room.domain.service;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -42,11 +43,14 @@ class RoomEventOutboxRelayTests {
     @Mock
     private RabbitTemplate rabbitTemplate;
 
+    private SimpleMeterRegistry meterRegistry;
     private RoomEventOutboxRelay relay;
 
     @BeforeEach
     void setUp() {
-        relay = new RoomEventOutboxRelay(repository, rabbitTemplate, 100, Clock.fixed(NOW, ZoneOffset.UTC));
+        meterRegistry = new SimpleMeterRegistry();
+        relay = new RoomEventOutboxRelay(repository, rabbitTemplate, meterRegistry, 100,
+                Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -76,6 +80,8 @@ class RoomEventOutboxRelayTests {
         assertThat(message.getMessageProperties().getDeliveryMode()).isEqualTo(MessageDeliveryMode.PERSISTENT);
         assertThat(entry.getPublishedAt()).isEqualTo(NOW);
         assertThat(entry.getAttemptCount()).isZero();
+        assertThat(deliveryCount("confirmed")).isEqualTo(1);
+        assertThat(deliveryCount("deferred")).isZero();
     }
 
     @Test
@@ -92,10 +98,31 @@ class RoomEventOutboxRelayTests {
         assertThat(entry.getAttemptCount()).isEqualTo(1);
         assertThat(entry.getNextAttemptAt()).isEqualTo(NOW.plusSeconds(1));
         assertThat(entry.getLastError()).isEqualTo(IllegalStateException.class.getName());
+        assertThat(deliveryCount("deferred")).isEqualTo(1);
     }
 
     @Test
-    void brokerNackAndUnroutableConfirmAreNotMarkedPublished() {
+    void brokerNackIsDeferredWithoutMarkingEventPublished() {
+        RoomEventOutboxEntry entry = entry(UUID.randomUUID(), "RoomMaintenanceChanged");
+        when(repository.claimDue(NOW)).thenReturn(List.of(entry));
+        doAnswer(invocation -> {
+            CorrelationData correlation = invocation.getArgument(3);
+            correlation.getFuture().complete(new CorrelationData.Confirm(false, "nack"));
+            return null;
+        }).when(rabbitTemplate).send(eq(RoomEventMessagingConfiguration.EVENTS_EXCHANGE),
+                eq(RoomEventMessagingConfiguration.MAINTENANCE_ROUTING_KEY), any(Message.class),
+                any(CorrelationData.class));
+
+        relay.publishPendingEvents();
+
+        assertThat(entry.getPublishedAt()).isNull();
+        assertThat(entry.getAttemptCount()).isEqualTo(1);
+        assertThat(entry.getNextAttemptAt()).isEqualTo(NOW.plusSeconds(1));
+        assertThat(deliveryCount("deferred")).isEqualTo(1);
+    }
+
+    @Test
+    void unroutableConfirmedEventIsDeferredWithoutMarkingPublished() {
         RoomEventOutboxEntry entry = entry(UUID.randomUUID(), "RoomMaintenanceChanged");
         when(repository.claimDue(NOW)).thenReturn(List.of(entry));
         doAnswer(invocation -> {
@@ -114,6 +141,62 @@ class RoomEventOutboxRelayTests {
         assertThat(entry.getPublishedAt()).isNull();
         assertThat(entry.getAttemptCount()).isEqualTo(1);
         assertThat(entry.getNextAttemptAt()).isEqualTo(NOW.plusSeconds(1));
+        assertThat(deliveryCount("deferred")).isEqualTo(1);
+    }
+
+    @Test
+    void interruptedConfirmWaitDefersEventAndRestoresInterruptStatus() {
+        RoomEventOutboxEntry entry = entry(UUID.randomUUID(), "RoomStatusChanged");
+        when(repository.claimDue(NOW)).thenReturn(List.of(entry));
+        doAnswer(invocation -> null).when(rabbitTemplate).send(
+                eq(RoomEventMessagingConfiguration.EVENTS_EXCHANGE),
+                eq(RoomEventMessagingConfiguration.STATUS_ROUTING_KEY), any(Message.class),
+                any(CorrelationData.class));
+
+        Thread.currentThread().interrupt();
+        try {
+            relay.publishPendingEvents();
+
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+            assertThat(entry.getPublishedAt()).isNull();
+            assertThat(entry.getAttemptCount()).isEqualTo(1);
+            assertThat(entry.getNextAttemptAt()).isEqualTo(NOW.plusSeconds(1));
+            assertThat(deliveryCount("deferred")).isEqualTo(1);
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void retryKeepsThePersistedEventIdAcrossRedelivery() {
+        UUID eventId = UUID.randomUUID();
+        RoomEventOutboxEntry entry = entry(eventId, "RoomStatusChanged");
+        when(repository.claimDue(NOW)).thenReturn(List.of(entry));
+        doAnswer(invocation -> {
+            CorrelationData correlation = invocation.getArgument(3);
+            correlation.getFuture().complete(new CorrelationData.Confirm(false, "nack"));
+            return null;
+        }).when(rabbitTemplate).send(eq(RoomEventMessagingConfiguration.EVENTS_EXCHANGE),
+                eq(RoomEventMessagingConfiguration.STATUS_ROUTING_KEY), any(Message.class),
+                any(CorrelationData.class));
+
+        relay.publishPendingEvents();
+        relay.publishPendingEvents();
+
+        ArgumentCaptor<Message> messages = ArgumentCaptor.forClass(Message.class);
+        verify(rabbitTemplate, org.mockito.Mockito.times(2)).send(
+                eq(RoomEventMessagingConfiguration.EVENTS_EXCHANGE),
+                eq(RoomEventMessagingConfiguration.STATUS_ROUTING_KEY), messages.capture(), any(CorrelationData.class));
+        assertThat(messages.getAllValues())
+                .extracting(message -> message.getMessageProperties().getMessageId())
+                .containsExactly(eventId.toString(), eventId.toString());
+        assertThat(entry.getPublishedAt()).isNull();
+        assertThat(entry.getAttemptCount()).isEqualTo(2);
+        assertThat(deliveryCount("deferred")).isEqualTo(2);
+    }
+
+    private double deliveryCount(String outcome) {
+        return meterRegistry.get("roomiq.room.outbox.delivery").tag("outcome", outcome).counter().count();
     }
 
     private static RoomEventOutboxEntry entry(UUID id, String eventType) {

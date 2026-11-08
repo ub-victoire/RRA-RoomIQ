@@ -37,6 +37,24 @@ services:
     volumes:
       - redis_data:/data
 
+  records-lifecycle-service:
+    profiles: ["applications"]
+    build:
+      context: ..
+      dockerfile: records-lifecycle-service/Dockerfile
+    environment:
+      RLC_SERVICE_PORT: "8089"
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-production}
+      RLC_DB_URL: ${RLC_DB_URL:-}
+      RLC_DB_USERNAME: ${RLC_DB_USERNAME:-}
+      RLC_DB_PASSWORD: ${RLC_DB_PASSWORD:-}
+      RLC_DB_MIGRATION_USERNAME: ${RLC_DB_MIGRATION_USERNAME:-}
+      RLC_DB_MIGRATION_PASSWORD: ${RLC_DB_MIGRATION_PASSWORD:-}
+      IDENTITY_SERVICE_URL: ${IDENTITY_SERVICE_URL:-}
+      JWT_SECRET: ${JWT_SECRET:-}
+    ports:
+      - "${RLC_HOST_PORT:-8089}:8089"
+
 volumes:
   postgres_data:
   redis_data:

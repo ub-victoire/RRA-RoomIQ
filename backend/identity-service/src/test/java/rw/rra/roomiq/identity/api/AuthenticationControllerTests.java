@@ -7,7 +7,12 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
+import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import rw.rra.roomiq.identity.domain.entity.AppUser;
@@ -62,6 +67,9 @@ class AuthenticationControllerTests {
     @Autowired
     private JwtDecoder jwtDecoder;
 
+    @Autowired
+    private JwtEncoder jwtEncoder;
+
     @Test
     void publicAndProtectedRoutesFollowTheExplicitSecurityAllowlist() throws Exception {
         mockMvc.perform(get("/actuator/health"))
@@ -100,11 +108,11 @@ class AuthenticationControllerTests {
                 .andReturn().getResponse().getContentAsString();
 
         Map<?, ?> paths = JsonPath.read(document, "$.paths");
-        assertThat(paths).hasSize(23);
+        assertThat(paths).hasSize(24);
         int operationCount = paths.values().stream()
                 .mapToInt(path -> ((Map<?, ?>) path).size())
                 .sum();
-        assertThat(operationCount).isEqualTo(31);
+        assertThat(operationCount).isEqualTo(32);
 
         Map<?, ?> schemes = JsonPath.read(document, "$.components.securitySchemes");
         assertThat(schemes.keySet().toString()).contains("bearerAuth");
@@ -159,6 +167,10 @@ class AuthenticationControllerTests {
                 "$.paths['/api/v1/internal/authorization/audit-search'].post");
         assertThat(String.valueOf(auditSearchAuthorization.get("summary"))).contains("audit search");
         assertThat(String.valueOf(auditSearchAuthorization.get("security"))).contains("bearerAuth");
+        Map<?, ?> retentionPolicyAuthorization = JsonPath.read(document,
+                "$.paths['/api/v1/internal/authorization/retention-policy'].post");
+        assertThat(String.valueOf(retentionPolicyAuthorization.get("summary"))).contains("retention-policy");
+        assertThat(String.valueOf(retentionPolicyAuthorization.get("security"))).contains("bearerAuth");
     }
 
     @Test
@@ -262,6 +274,72 @@ class AuthenticationControllerTests {
     }
 
     @Test
+    void invalidAndExpiredAccessTokensAreRejected() throws Exception {
+        AppUser user = createUser("auth-expired-access@rra.rw", UserStatus.ACTIVE);
+        String accessToken = loginAccessToken(user.getEmail());
+        var decoded = jwtDecoder.decode(accessToken);
+        Instant issuedAt = Instant.now().minusSeconds(120);
+        String expiredAccessToken = jwtEncoder.encode(JwtEncoderParameters.from(
+                JwsHeader.with(MacAlgorithm.HS256).type("JWT").build(),
+                JwtClaimsSet.builder()
+                        .issuer("rra-roomiq-identity")
+                        .subject(user.getId().toString())
+                        .id(decoded.getId())
+                        .issuedAt(issuedAt)
+                        .expiresAt(issuedAt.plusSeconds(60))
+                        .claim("email", user.getEmail())
+                        .build())).getTokenValue();
+        String wrongIssuerToken = jwtEncoder.encode(JwtEncoderParameters.from(
+                JwsHeader.with(MacAlgorithm.HS256).type("JWT").build(),
+                JwtClaimsSet.builder()
+                        .issuer("untrusted-issuer")
+                        .subject(user.getId().toString())
+                        .id(decoded.getId())
+                        .issuedAt(Instant.now().minusSeconds(1))
+                        .expiresAt(Instant.now().plusSeconds(60))
+                        .claim("email", user.getEmail())
+                        .build())).getTokenValue();
+
+        mockMvc.perform(get("/api/v1/users/{id}", user.getId())
+                        .header("Authorization", "Bearer invalid-token"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"));
+        mockMvc.perform(get("/api/v1/users/{id}", user.getId())
+                        .header("Authorization", "Bearer " + wrongIssuerToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"));
+        mockMvc.perform(get("/api/v1/users/{id}", user.getId())
+                        .header("Authorization", "Bearer " + expiredAccessToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"));
+    }
+
+    @Test
+    void deactivatedAndDeletedAccountsCannotUsePreviouslyIssuedAccessTokens() throws Exception {
+        AppUser disabledUser = createUser("auth-disabled-token@rra.rw", UserStatus.ACTIVE);
+        String disabledToken = loginAccessToken(disabledUser.getEmail());
+        disabledUser = userRepository.findById(disabledUser.getId()).orElseThrow();
+        disabledUser.updateStatus(UserStatus.DISABLED);
+        userRepository.saveAndFlush(disabledUser);
+
+        mockMvc.perform(get("/api/v1/users/{id}", disabledUser.getId())
+                        .header("Authorization", "Bearer " + disabledToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"));
+
+        AppUser deletedUser = createUser("auth-deleted-token@rra.rw", UserStatus.ACTIVE);
+        String deletedToken = loginAccessToken(deletedUser.getEmail());
+        deletedUser = userRepository.findById(deletedUser.getId()).orElseThrow();
+        deletedUser.markDeleted();
+        userRepository.saveAndFlush(deletedUser);
+
+        mockMvc.perform(get("/api/v1/users/{id}", deletedUser.getId())
+                        .header("Authorization", "Bearer " + deletedToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"));
+    }
+
+    @Test
     void invalidPasswordAndInactiveAccountsAreRejectedUniformly() throws Exception {
         createUser("auth-pending@rra.rw", UserStatus.PENDING);
         createUser("auth-suspended@rra.rw", UserStatus.SUSPENDED);
@@ -300,6 +378,15 @@ class AuthenticationControllerTests {
         String payload = auditOutboxRepository
                 .findTopByEventTypeOrderByCreatedAtDesc("AUTHENTICATION_FAILED").orElseThrow().getPayload();
         assertThat(payload).doesNotContain(email, password);
+    }
+
+    private String loginAccessToken(String email) throws Exception {
+        String body = "{\"email\":\"" + email + "\",\"password\":\"Good-password-9\"}";
+        String response = mockMvc.perform(post("/api/v1/auth/login").with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        return JsonPath.read(response, "$.data.accessToken");
     }
 
     private String sha256(String rawToken) throws Exception {

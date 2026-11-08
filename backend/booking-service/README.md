@@ -16,8 +16,10 @@ Identity returns trusted display data only for authorized actions. Booking deriv
 - Focused verification passed 21/21 tests: occupancy service (4), Booking application/PostgreSQL integration (8), and authorization interceptor (9), with zero failures, errors, or skips.
 - Flyway V7 adds the user-approved service-local `booking_event_outbox` table; Booking writes one `booking.occupancy.changed` v1 UPSERT per confirmed/extended occurrence and REMOVE per active occurrence during cancellation or explicit release, inside the same database transaction as the occupancy change.
 - The scheduled relay claims pending rows with PostgreSQL `FOR UPDATE SKIP LOCKED`, publishes persistent JSON messages to `roomiq.events.v1` with routing key `booking.occupancy.changed`, and marks delivery only after a correlated positive confirm with no mandatory return. Failures persist the attempt count, exception type, and capped exponential retry time; rows are retained for retry and repeated failures are logged at error level.
+- The relay emits the Micrometer counter `roomiq.booking.outbox.delivery` with bounded `outcome=confirmed|deferred` tags. This change does not expose a new actuator endpoint or add a metrics exporter; deployment must provide an approved registry/exporter and scrape path if external collection is required.
 - Delivery is at-least-once if a process fails after broker confirmation but before the outbox transaction commits. Consumers must deduplicate by `eventId`; equal `reservationVersion` events are all meaningful for recurring occurrences, while strictly older versions can be ignored. Scheduling has no event consumer and continues to use the fresh synchronous occupancy snapshot as its authority.
 - Focused S6-13 outbox/transaction verification passed 20/20; the full Booking reactor passed 138/138, Identity 53/53, common-web 6/6, and the full 11-module backend reactor passed 311/311, all with zero failures, errors, or skips.
+- Reliability follow-up (2026-11-05): the relay now emits bounded Micrometer confirmed/deferred delivery counters. Focused Booking outbox/transaction tests passed 61/61; the complete Booking dependency slice passed common-web 6/6 and Booking 151/151; Notification's RabbitMQ/PostgreSQL duplicate-delivery suite passed 6/6; the full 11-module reactor passed 552/552. Every run had zero failures, errors, or skips. External metrics export/scraping remains an operations provisioning dependency.
 
 ## S7-01 Booking event production
 
@@ -35,6 +37,21 @@ S7-02 Booking event routing facts and the requester/decision recipient identifie
 - `mvn -f backend/pom.xml -pl identity-service,common-web test`: Identity passed 53/53 and common-web passed 6/6.
 - `mvn -f backend/pom.xml test`: all 11 backend modules passed, 311 tests total, with zero failures, errors, or skips. PostgreSQL exclusion-conflict and deadlock races ran as tests; both are expected conflict cases, not suite failures.
 - Contract JSON validation and `git diff --check` passed. No implementation or ERD change was needed for this regression gate.
+
+### Booking workflow verification follow-up — 2026-11-08
+
+- Added PostgreSQL-backed coverage in [BookingDecisionPostgresTests](src/test/java/rw/rra/roomiq/booking/BookingDecisionPostgresTests.java) for draft creation → submission → authorized reviewer approval. It verifies persisted request/decision state, confirmed reservation, initial private meeting, organizer participant, existing outbox events, and reminders; it also asserts that no `BookingRequested` event exists before submission.
+- The test mocks Identity authorization and owner-service calls. This is Booking integration coverage, not live multi-service end-to-end verification. Individual service-slice tests also passed, but no complete running Identity → Organization/Room/Scheduling → Booking → Notification workflow was exercised. Live multi-service E2E remains unverified.
+- Focused Booking PostgreSQL command `mvn -f backend/pom.xml -pl booking-service -am -Dtest=BookingDecisionPostgresTests -Dsurefire.failIfNoSpecifiedTests=false test` passed 44 tests.
+- The selected workflow service command below passed 208 tests:
+
+  ```sh
+  mvn -f backend/pom.xml -pl identity-service,organization-service,room-service,scheduling-service,booking-service,notification-service -am -Dtest=AuthenticationControllerTests,BookingAuthorizationControllerTests,OrganizationAuthorizationInterceptorTests,OrganizationCrudApiTests,OrganizationDomainPersistenceTests,OrganizationPostgresMigrationTests,RoomServiceApplicationTests,RoomEventOutboxRepositoryPostgresTests,HttpOrganizationDirectoryClientTests,AvailabilitySearchServiceTests,RecurrenceRuleApiTests,SchedulingConstraintApiTests,BookingDecisionPostgresTests,BookingOwnerServicesClientTests,NotificationEventProcessingPostgresTests,NotificationEventProcessingRoutingTests,NotificationEventListenerRabbitPostgresTests -Dsurefire.failIfNoSpecifiedTests=false test
+  ```
+
+- The full backend reactor command `mvn -f backend/pom.xml test` passed 563 tests across 11 modules. All three test commands exited 0 with zero failures, errors, or skips; `git diff --check` exited 0.
+- The first focused run failed because the test expected `buildingId` in the existing `BookingRequested` payload. The assertion was corrected to check only facts present in the approved event contract, and the rerun passed. The full reactor emitted a non-fatal Surefire fork-JVM shutdown warning after successful test completion.
+- No production API, event contract, database schema, migration, or API Gateway route changed. Gateway routing remains pending; this verification does not approve or imply an approved route allowlist.
 
 ## S6-09 cancellation APIs
 

@@ -1,5 +1,7 @@
 package rw.rra.roomiq.booking.domain.service;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
@@ -32,20 +34,31 @@ public class BookingEventOutboxRelay {
     private final RabbitTemplate rabbitTemplate;
     private final long confirmTimeoutMillis;
     private final Clock clock;
+    private final Counter confirmedEvents;
+    private final Counter deferredEvents;
 
     @Autowired
     public BookingEventOutboxRelay(BookingEventOutboxRepository outboxRepository, RabbitTemplate rabbitTemplate,
+                                   MeterRegistry meterRegistry,
                                    @Value("${roomiq.booking.event-relay.confirm-timeout-ms:3000}")
                                    long confirmTimeoutMillis) {
-        this(outboxRepository, rabbitTemplate, confirmTimeoutMillis, Clock.systemUTC());
+        this(outboxRepository, rabbitTemplate, meterRegistry, confirmTimeoutMillis, Clock.systemUTC());
     }
 
     BookingEventOutboxRelay(BookingEventOutboxRepository outboxRepository, RabbitTemplate rabbitTemplate,
-                            long confirmTimeoutMillis, Clock clock) {
+                            MeterRegistry meterRegistry, long confirmTimeoutMillis, Clock clock) {
         this.outboxRepository = outboxRepository;
         this.rabbitTemplate = rabbitTemplate;
         this.confirmTimeoutMillis = confirmTimeoutMillis;
         this.clock = clock;
+        this.confirmedEvents = Counter.builder("roomiq.booking.outbox.delivery")
+                .description("Booking outbox events acknowledged and routed by the broker")
+                .tag("outcome", "confirmed")
+                .register(meterRegistry);
+        this.deferredEvents = Counter.builder("roomiq.booking.outbox.delivery")
+                .description("Booking outbox events retained for retry after delivery failure")
+                .tag("outcome", "deferred")
+                .register(meterRegistry);
     }
 
     @Scheduled(fixedDelayString = "${roomiq.booking.event-relay.fixed-delay-ms:1000}")
@@ -56,6 +69,7 @@ public class BookingEventOutboxRelay {
             try {
                 publish(entry);
                 entry.markPublished(clock.instant());
+                confirmedEvents.increment();
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
                 defer(entry, exception, now);
@@ -106,6 +120,7 @@ public class BookingEventOutboxRelay {
     private void defer(BookingEventOutboxEntry entry, Exception exception, Instant now) {
         entry.deferUntil(now.plusSeconds(retryDelaySeconds(entry.getAttemptCount())),
                 exception.getClass().getName());
+        deferredEvents.increment();
         if (entry.getAttemptCount() >= OPERATIONAL_ALERT_ATTEMPT) {
             log.error("Booking event repeatedly failed delivery eventId={} eventType={} attemptCount={} failureType={}",
                     entry.getEventId(), entry.getEventType(), entry.getAttemptCount(), entry.getLastError());

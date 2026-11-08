@@ -1,5 +1,6 @@
 package rw.rra.roomiq.booking.domain.service;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -16,10 +17,10 @@ import rw.rra.roomiq.booking.config.BookingEventMessagingConfiguration;
 import rw.rra.roomiq.booking.domain.entity.BookingEventOutboxEntry;
 import rw.rra.roomiq.booking.domain.repository.BookingEventOutboxRepository;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
 
@@ -41,11 +42,14 @@ class BookingEventOutboxRelayTests {
     @Mock
     private RabbitTemplate rabbitTemplate;
 
+    private SimpleMeterRegistry meterRegistry;
     private BookingEventOutboxRelay relay;
 
     @BeforeEach
     void setUp() {
-        relay = new BookingEventOutboxRelay(outboxRepository, rabbitTemplate, 100, Clock.fixed(NOW, ZoneOffset.UTC));
+        meterRegistry = new SimpleMeterRegistry();
+        relay = new BookingEventOutboxRelay(outboxRepository, rabbitTemplate, meterRegistry,
+                100, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -75,6 +79,8 @@ class BookingEventOutboxRelayTests {
         assertThat(message.getMessageProperties().getDeliveryMode()).isEqualTo(MessageDeliveryMode.PERSISTENT);
         assertThat(entry.getPublishedAt()).isEqualTo(NOW);
         assertThat(entry.getAttemptCount()).isZero();
+        assertThat(deliveryCount("confirmed")).isEqualTo(1);
+        assertThat(deliveryCount("deferred")).isZero();
     }
 
     @Test
@@ -95,6 +101,7 @@ class BookingEventOutboxRelayTests {
         assertThat(entry.getAttemptCount()).isEqualTo(1);
         assertThat(entry.getNextAttemptAt()).isEqualTo(NOW.plusSeconds(1));
         assertThat(entry.getLastError()).isEqualTo(IllegalStateException.class.getName());
+        assertThat(deliveryCount("deferred")).isEqualTo(1);
     }
 
     @Test
@@ -111,6 +118,7 @@ class BookingEventOutboxRelayTests {
         assertThat(entry.getAttemptCount()).isEqualTo(1);
         assertThat(entry.getLastError()).isEqualTo(IllegalStateException.class.getName());
         assertThat(entry.getNextAttemptAt()).isEqualTo(NOW.plusSeconds(1));
+        assertThat(deliveryCount("deferred")).isEqualTo(1);
     }
 
     @Test
@@ -229,5 +237,12 @@ class BookingEventOutboxRelayTests {
         }
         return new BookingEventOutboxEntry(eventId, eventType, 1,
                 BookingOccupancyOutboxService.AGGREGATE_TYPE, UUID.randomUUID(), 1, payload, NOW, NOW);
+    }
+
+    private double deliveryCount(String outcome) {
+        return meterRegistry.get("roomiq.booking.outbox.delivery")
+                .tag("outcome", outcome)
+                .counter()
+                .count();
     }
 }
