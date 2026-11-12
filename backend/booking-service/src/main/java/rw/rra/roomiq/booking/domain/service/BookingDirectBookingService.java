@@ -51,6 +51,7 @@ public class BookingDirectBookingService {
     private final BookingConfirmationService confirmationService;
     private final PostgresIdempotencyLock idempotencyLock;
     private final BookingDomainEventOutboxService domainEvents;
+    private final BookingSourceEvidenceOutboxService sourceEvidenceOutbox;
     private final Clock clock;
 
     @Autowired
@@ -62,9 +63,10 @@ public class BookingDirectBookingService {
                                        BookingOwnerServicesClient ownerServicesClient,
                                        BookingConfirmationService confirmationService,
                                        PostgresIdempotencyLock idempotencyLock,
-                                       BookingDomainEventOutboxService domainEvents) {
+                                       BookingDomainEventOutboxService domainEvents,
+                                       BookingSourceEvidenceOutboxService sourceEvidenceOutbox) {
         this(requests, reservations, occurrences, meetings, authorizationClient, ownerServicesClient,
-                confirmationService, idempotencyLock, domainEvents, Clock.systemUTC());
+                confirmationService, idempotencyLock, domainEvents, sourceEvidenceOutbox, Clock.systemUTC());
     }
 
     BookingDirectBookingService(BookingRequestRepository requests,
@@ -76,6 +78,7 @@ public class BookingDirectBookingService {
                                 BookingConfirmationService confirmationService,
                                 PostgresIdempotencyLock idempotencyLock,
                                 BookingDomainEventOutboxService domainEvents,
+                                BookingSourceEvidenceOutboxService sourceEvidenceOutbox,
                                 Clock clock) {
         this.requests = requests;
         this.reservations = reservations;
@@ -86,6 +89,7 @@ public class BookingDirectBookingService {
         this.confirmationService = confirmationService;
         this.idempotencyLock = idempotencyLock;
         this.domainEvents = domainEvents;
+        this.sourceEvidenceOutbox = sourceEvidenceOutbox;
         this.clock = clock;
     }
 
@@ -155,6 +159,7 @@ public class BookingDirectBookingService {
             }
             throw exception;
         }
+        sourceEvidenceOutbox.record(bookingRequest, now, null);
 
         domainEvents.record(2, "BookingRequested", "BOOKING_REQUEST", bookingRequest.getId(),
                 bookingRequest.getVersion(), now, List.of(), Map.of(

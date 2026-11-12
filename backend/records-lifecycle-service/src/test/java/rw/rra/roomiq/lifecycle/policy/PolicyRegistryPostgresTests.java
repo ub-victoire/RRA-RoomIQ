@@ -83,6 +83,12 @@ class PolicyRegistryPostgresTests {
         assertThat(dbaJdbcTemplate().queryForObject(
                 "SELECT COUNT(*) FROM flyway_schema_history WHERE version = '5' AND success = TRUE",
                 Integer.class)).isEqualTo(1);
+        assertThat(dbaJdbcTemplate().queryForObject(
+                "SELECT COUNT(*) FROM flyway_schema_history WHERE version = '6' AND success = TRUE",
+                Integer.class)).isEqualTo(1);
+        assertThat(dbaJdbcTemplate().queryForObject(
+                "SELECT COUNT(*) FROM flyway_schema_history WHERE version = '7' AND success = TRUE",
+                Integer.class)).isEqualTo(1);
 
         assertThat(columns("lifecycle_policy_version")).containsExactlyInAnyOrder(
                 "policy_version_id", "version_label", "document_sha256", "approval_reference", "policy_version",
@@ -107,6 +113,22 @@ class PolicyRegistryPostgresTests {
                 .contains("ck_lifecycle_control_event_aggregate_type", "ck_lifecycle_control_event_sequence",
                         "uq_lifecycle_control_event_sequence", "ck_lifecycle_control_event_type");
         assertThat(indexExists("ix_lifecycle_control_event_aggregate_recorded")).isTrue();
+        assertThat(columns("lifecycle_source_evidence_receipt")).containsExactlyInAnyOrder(
+                "receipt_id", "contract_version", "source_service", "authenticated_source_service", "record_type",
+                "record_id", "event_id", "event_type", "event_version", "source_revision", "category_code",
+                "record_created_at", "occurred_at", "authoritative_start_at", "start_basis_code", "closed_at",
+                "decision_at", "transaction_closed_at", "actor_subject", "correlation_id", "causation_id",
+                "supersedes_event_id", "received_at", "evidence_sha256", "outcome", "rejection_code",
+                "current_lifecycle_status", "observed_at");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT pg_get_userbyid(relowner)
+                FROM pg_class WHERE oid = 'public.lifecycle_source_evidence_receipt'::regclass
+                """, String.class)).isEqualTo("roomiq_rlc_migrator");
+        assertThat(privilege("lifecycle_source_evidence_receipt", "SELECT")).isTrue();
+        assertThat(privilege("lifecycle_source_evidence_receipt", "INSERT")).isTrue();
+        assertThat(privilege("lifecycle_source_evidence_receipt", "UPDATE")).isFalse();
+        assertThat(privilege("lifecycle_source_evidence_receipt", "DELETE")).isFalse();
+        assertThat(privilege("lifecycle_source_evidence_receipt", "TRUNCATE")).isFalse();
     }
 
     @Test

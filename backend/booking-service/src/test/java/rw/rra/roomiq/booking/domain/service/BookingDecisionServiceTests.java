@@ -58,6 +58,8 @@ class BookingDecisionServiceTests {
     private BookingConfirmationService confirmationService;
     @Mock
     private BookingDomainEventOutboxService domainEvents;
+    @Mock
+    private BookingSourceEvidenceOutboxService sourceEvidenceOutbox;
 
     private BookingDecisionService service;
     private UUID requestId;
@@ -70,7 +72,7 @@ class BookingDecisionServiceTests {
     @BeforeEach
     void setUp() {
         service = new BookingDecisionService(bookingRequests, decisions, reservations, authorizationClient,
-                confirmationService, domainEvents, Clock.fixed(NOW, ZoneOffset.UTC));
+                confirmationService, domainEvents, sourceEvidenceOutbox, Clock.fixed(NOW, ZoneOffset.UTC));
         requestId = UUID.randomUUID();
         requesterId = UUID.randomUUID();
         approverId = UUID.randomUUID();

@@ -43,6 +43,7 @@ public class BookingCancellationService {
     private final BookingOwnerServicesClient ownerServicesClient;
     private final BookingOccupancyOutboxService occupancyOutbox;
     private final BookingDomainEventOutboxService domainEvents;
+    private final BookingSourceEvidenceOutboxService sourceEvidenceOutbox;
     private final Clock clock;
 
     @Autowired
@@ -53,9 +54,10 @@ public class BookingCancellationService {
                                      BookingAuthorizationClient authorizationClient,
                                      BookingOwnerServicesClient ownerServicesClient,
                                      BookingOccupancyOutboxService occupancyOutbox,
-                                     BookingDomainEventOutboxService domainEvents) {
+                                     BookingDomainEventOutboxService domainEvents,
+                                     BookingSourceEvidenceOutboxService sourceEvidenceOutbox) {
         this(bookingRequests, reservations, occurrences, cancellations, authorizationClient,
-                ownerServicesClient, occupancyOutbox, domainEvents, Clock.systemUTC());
+                ownerServicesClient, occupancyOutbox, domainEvents, sourceEvidenceOutbox, Clock.systemUTC());
     }
 
     BookingCancellationService(BookingRequestRepository bookingRequests,
@@ -65,7 +67,8 @@ public class BookingCancellationService {
                                BookingAuthorizationClient authorizationClient,
                                BookingOwnerServicesClient ownerServicesClient,
                                BookingOccupancyOutboxService occupancyOutbox,
-                               BookingDomainEventOutboxService domainEvents, Clock clock) {
+                               BookingDomainEventOutboxService domainEvents,
+                               BookingSourceEvidenceOutboxService sourceEvidenceOutbox, Clock clock) {
         this.bookingRequests = bookingRequests;
         this.reservations = reservations;
         this.occurrences = occurrences;
@@ -74,6 +77,7 @@ public class BookingCancellationService {
         this.ownerServicesClient = ownerServicesClient;
         this.occupancyOutbox = occupancyOutbox;
         this.domainEvents = domainEvents;
+        this.sourceEvidenceOutbox = sourceEvidenceOutbox;
         this.clock = clock;
     }
 
@@ -111,6 +115,7 @@ public class BookingCancellationService {
                 authorization.actorUserId(), request.reasonCode(), request.reason().trim(), null,
                 false, null, now));
         bookingRequests.saveAndFlush(bookingRequest);
+        sourceEvidenceOutbox.record(bookingRequest, now, null);
         domainEvents.record("BookingCancelled", "CANCELLATION", cancellation.getId(), 0, now,
                 trustedRecipients(bookingRequest.getRequestedByUserId(), authorization.actorUserId()), Map.of(
                         "cancelledByUserId", authorization.actorUserId().toString(),
@@ -164,6 +169,7 @@ public class BookingCancellationService {
                 occurrences.findAllByReservationIdForUpdate(reservationId);
         reservations.saveAndFlush(reservation);
         bookingRequests.saveAndFlush(bookingRequest);
+        sourceEvidenceOutbox.record(bookingRequest, now, null);
         occupancyOutbox.recordRemovals(reservation, reservationOccurrences, now);
         reservationOccurrences.forEach(ReservationOccurrence::releaseOccupancy);
         occurrences.saveAllAndFlush(reservationOccurrences);

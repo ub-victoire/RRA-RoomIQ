@@ -18,6 +18,8 @@ public record RetentionEvaluationResult(
     public enum Reason {
         OWNER_UNKNOWN,
         OWNER_UNACKNOWLEDGED,
+        SOURCE_EVIDENCE_MISSING,
+        SOURCE_EVIDENCE_CONFLICT,
         CATEGORY_UNKNOWN,
         AUTHORITATIVE_START_MISSING,
         EVALUATION_TIME_MISSING,

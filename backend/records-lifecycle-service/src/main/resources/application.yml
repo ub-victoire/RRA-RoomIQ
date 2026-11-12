@@ -48,6 +48,12 @@ logging:
 roomiq:
   auth:
     jwt-secret: ${JWT_SECRET}
+    booking-service-token:
+      issuer: ${BOOKING_SERVICE_TOKEN_ISSUER:}
+      current-key-id: ${BOOKING_SOURCE_EVIDENCE_CURRENT_KEY_ID:}
+      current-public-key-location: ${BOOKING_SOURCE_EVIDENCE_CURRENT_PUBLIC_KEY_LOCATION:}
+      previous-key-id: ${BOOKING_SOURCE_EVIDENCE_PREVIOUS_KEY_ID:}
+      previous-public-key-location: ${BOOKING_SOURCE_EVIDENCE_PREVIOUS_PUBLIC_KEY_LOCATION:}
   identity:
     url: ${IDENTITY_SERVICE_URL}
     connect-timeout: ${IDENTITY_CONNECT_TIMEOUT:2s}

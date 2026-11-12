@@ -42,6 +42,7 @@ public class BookingDecisionService {
     private final BookingAuthorizationClient authorizationClient;
     private final BookingConfirmationService confirmationService;
     private final BookingDomainEventOutboxService domainEvents;
+    private final BookingSourceEvidenceOutboxService sourceEvidenceOutbox;
     private final Clock clock;
 
     @Autowired
@@ -50,9 +51,10 @@ public class BookingDecisionService {
                                   ReservationRepository reservations,
                                   BookingAuthorizationClient authorizationClient,
                                   BookingConfirmationService confirmationService,
-                                  BookingDomainEventOutboxService domainEvents) {
+                                  BookingDomainEventOutboxService domainEvents,
+                                  BookingSourceEvidenceOutboxService sourceEvidenceOutbox) {
         this(bookingRequests, decisions, reservations, authorizationClient, confirmationService,
-                domainEvents, Clock.systemUTC());
+                domainEvents, sourceEvidenceOutbox, Clock.systemUTC());
     }
 
     BookingDecisionService(BookingRequestRepository bookingRequests,
@@ -61,6 +63,7 @@ public class BookingDecisionService {
                            BookingAuthorizationClient authorizationClient,
                            BookingConfirmationService confirmationService,
                            BookingDomainEventOutboxService domainEvents,
+                           BookingSourceEvidenceOutboxService sourceEvidenceOutbox,
                            Clock clock) {
         this.bookingRequests = bookingRequests;
         this.decisions = decisions;
@@ -68,6 +71,7 @@ public class BookingDecisionService {
         this.authorizationClient = authorizationClient;
         this.confirmationService = confirmationService;
         this.domainEvents = domainEvents;
+        this.sourceEvidenceOutbox = sourceEvidenceOutbox;
         this.clock = clock;
     }
 
@@ -123,6 +127,7 @@ public class BookingDecisionService {
         try {
             decisions.saveAndFlush(decision);
             bookingRequests.saveAndFlush(bookingRequest);
+            sourceEvidenceOutbox.record(bookingRequest, decidedAt, decidedAt);
             Map<String, Object> facts = new LinkedHashMap<>();
             facts.put("requesterUserId", bookingRequest.getRequestedByUserId().toString());
             facts.put("decidedByUserId", actor.toString());

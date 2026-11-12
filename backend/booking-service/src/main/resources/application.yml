@@ -38,6 +38,16 @@ roomiq:
   scheduling:
     url: ${SCHEDULING_SERVICE_URL:http://localhost:8084}
   booking:
+    source-evidence:
+      enabled: ${BOOKING_SOURCE_EVIDENCE_ENABLED:false}
+      rlc-url: ${RLC_SERVICE_URL:http://localhost:8089}
+      relay:
+        fixed-delay-ms: ${BOOKING_SOURCE_EVIDENCE_RELAY_FIXED_DELAY_MS:1000}
+      mappings: {}
+    service-auth:
+      issuer: ${BOOKING_SERVICE_TOKEN_ISSUER:}
+      key-id: ${BOOKING_SOURCE_EVIDENCE_SIGNING_KEY_ID:}
+      private-key-location: ${BOOKING_SOURCE_EVIDENCE_SIGNING_PRIVATE_KEY_LOCATION:}
     share-token:
       key-ring: ${BOOKING_SHARE_TOKEN_KEY_RING:}
       active-key-version: ${BOOKING_SHARE_TOKEN_ACTIVE_KEY_VERSION:v1}

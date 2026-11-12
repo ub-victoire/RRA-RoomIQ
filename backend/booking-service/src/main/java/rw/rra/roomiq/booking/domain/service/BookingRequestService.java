@@ -52,6 +52,7 @@ public class BookingRequestService {
     private final BookingOwnerServicesClient ownerServicesClient;
     private final PostgresIdempotencyLock idempotencyLock;
     private final BookingDomainEventOutboxService domainEvents;
+    private final BookingSourceEvidenceOutboxService sourceEvidenceOutbox;
     private final Clock clock;
 
     @Autowired
@@ -59,8 +60,10 @@ public class BookingRequestService {
                                  BookingAuthorizationClient authorizationClient,
                                  BookingOwnerServicesClient ownerServicesClient,
                                  PostgresIdempotencyLock idempotencyLock,
-                                 BookingDomainEventOutboxService domainEvents) {
-        this(repository, authorizationClient, ownerServicesClient, idempotencyLock, domainEvents, Clock.systemUTC());
+                                 BookingDomainEventOutboxService domainEvents,
+                                 BookingSourceEvidenceOutboxService sourceEvidenceOutbox) {
+        this(repository, authorizationClient, ownerServicesClient, idempotencyLock, domainEvents,
+                sourceEvidenceOutbox, Clock.systemUTC());
     }
 
     BookingRequestService(BookingRequestRepository repository,
@@ -68,12 +71,14 @@ public class BookingRequestService {
                           BookingOwnerServicesClient ownerServicesClient,
                           PostgresIdempotencyLock idempotencyLock,
                           BookingDomainEventOutboxService domainEvents,
+                          BookingSourceEvidenceOutboxService sourceEvidenceOutbox,
                           Clock clock) {
         this.repository = repository;
         this.authorizationClient = authorizationClient;
         this.ownerServicesClient = ownerServicesClient;
         this.idempotencyLock = idempotencyLock;
         this.domainEvents = domainEvents;
+        this.sourceEvidenceOutbox = sourceEvidenceOutbox;
         this.clock = clock;
     }
 
@@ -126,7 +131,9 @@ public class BookingRequestService {
                 BookingRequestStatus.DRAFT,
                 idempotencyKey,
                 now);
-        return BookingRequestResponse.from(repository.saveAndFlush(bookingRequest));
+        BookingRequest saved = repository.saveAndFlush(bookingRequest);
+        sourceEvidenceOutbox.record(saved, now, null);
+        return BookingRequestResponse.from(saved);
     }
 
     @Transactional
@@ -169,6 +176,7 @@ public class BookingRequestService {
                     "Only a draft booking request can be submitted");
         }
         BookingRequest submitted = repository.saveAndFlush(bookingRequest);
+        sourceEvidenceOutbox.record(submitted, now, null);
         domainEvents.record(2, "BookingRequested", "BOOKING_REQUEST", submitted.getId(), submitted.getVersion(),
                 now, List.of(), Map.of(
                         "requesterUserId", submitted.getRequestedByUserId().toString(),

@@ -58,6 +58,7 @@ public class BookingConfirmationService {
     private final BookingOwnerServicesClient ownerServicesClient;
     private final BookingOccupancyOutboxService occupancyOutbox;
     private final BookingDomainEventOutboxService domainEventOutbox;
+    private final BookingSourceEvidenceOutboxService sourceEvidenceOutbox;
 
     @Autowired
     public BookingConfirmationService(BookingRequestRepository bookingRequests,
@@ -67,7 +68,8 @@ public class BookingConfirmationService {
                                       MeetingParticipantRepository participants,
                                       BookingOwnerServicesClient ownerServicesClient,
                                       BookingOccupancyOutboxService occupancyOutbox,
-                                      BookingDomainEventOutboxService domainEventOutbox) {
+                                      BookingDomainEventOutboxService domainEventOutbox,
+                                      BookingSourceEvidenceOutboxService sourceEvidenceOutbox) {
         this.bookingRequests = bookingRequests;
         this.reservations = reservations;
         this.occurrences = occurrences;
@@ -76,6 +78,7 @@ public class BookingConfirmationService {
         this.ownerServicesClient = ownerServicesClient;
         this.occupancyOutbox = occupancyOutbox;
         this.domainEventOutbox = domainEventOutbox;
+        this.sourceEvidenceOutbox = sourceEvidenceOutbox;
     }
 
     @Transactional
@@ -155,6 +158,7 @@ public class BookingConfirmationService {
         meetings.saveAndFlush(meeting);
         participants.saveAndFlush(organizer);
         bookingRequests.saveAndFlush(bookingRequest);
+        sourceEvidenceOutbox.record(bookingRequest, confirmedAt, confirmedAt);
         recordMeetingReminders(meeting, reservation, reservationOccurrences,
                 bookingRequest.getRequestedByUserId(), references.timezone(), confirmedAt);
         return new ConfirmedBooking(reservation, meeting, reservationOccurrences.size());
