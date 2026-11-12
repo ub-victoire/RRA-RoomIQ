@@ -1,6 +1,9 @@
 package rw.rra.roomiq.booking.domain.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,6 +23,7 @@ import java.util.regex.Pattern;
 
 @Service
 public class BookingSourceEvidenceOutboxService {
+    private static final Logger log = LoggerFactory.getLogger(BookingSourceEvidenceOutboxService.class);
     private static final Pattern CODE = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
     private static final Pattern START_BASIS = Pattern.compile("[A-Z][A-Z0-9_]{0,39}");
 
@@ -27,6 +31,7 @@ public class BookingSourceEvidenceOutboxService {
     private final BookingSourceEvidenceProperties properties;
     private final Clock clock;
 
+    @Autowired
     public BookingSourceEvidenceOutboxService(BookingSourceEvidenceOutboxRepository repository,
                                               BookingSourceEvidenceProperties properties) {
         this(repository, properties, Clock.systemUTC());
@@ -79,16 +84,34 @@ public class BookingSourceEvidenceOutboxService {
         }
         BookingSourceEvidenceProperties.Mapping mapping = properties.mappingFor(requestType);
         if (mapping == null) {
+            reportConfigurationBlock(entry, "BOOKING_CATEGORY_MAPPING_MISSING");
             return;
         }
         String category = normalize(mapping.getCategoryCode());
         String startBasis = normalizeStartBasis(mapping.getStartBasisCode());
+        if (category == null) {
+            reportConfigurationBlock(entry, "BOOKING_CATEGORY_MAPPING_INVALID");
+            return;
+        }
+        if (startBasis == null) {
+            reportConfigurationBlock(entry, "BOOKING_START_BASIS_MAPPING_INVALID");
+            return;
+        }
         Instant startAt = authoritativeStart(startBasis, entry.recordCreatedAt(), entry.occurredAt(),
                 entry.closedAt());
-        if (category == null || startBasis == null || startAt == null) {
+        if (startAt == null) {
+            reportConfigurationBlock(entry, "BOOKING_START_BASIS_TIMESTAMP_UNAVAILABLE");
             return;
         }
         repository.applyMapping(entry.id(), category, startBasis, startAt);
+    }
+
+    private void reportConfigurationBlock(BookingSourceEvidenceOutboxEntry entry, String diagnosticCode) {
+        if (repository.recordConfigurationBlock(entry.id(), diagnosticCode)) {
+            log.warn("Booking source evidence remains blocked requestId={} requestType={} errorCode={} "
+                            + "configure an explicit category-code and supported start-basis-code mapping",
+                    entry.bookingRequestId(), entry.requestType(), diagnosticCode);
+        }
     }
 
     private static Instant authoritativeStart(String basis, Instant createdAt, Instant occurredAt, Instant closedAt) {

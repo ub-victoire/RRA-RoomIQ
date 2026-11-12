@@ -120,6 +120,15 @@ public class BookingSourceEvidenceOutboxRepository {
                 """, errorCode, rowId);
     }
 
+    public boolean recordConfigurationBlock(UUID rowId, String diagnosticCode) {
+        return jdbcTemplate.update("""
+                UPDATE booking_source_evidence_outbox
+                SET last_error_code = ?
+                WHERE id = ? AND delivery_status = 'CONFIGURATION_BLOCKED'
+                  AND last_error_code IS DISTINCT FROM ?
+                """, diagnosticCode, rowId, diagnosticCode) == 1;
+    }
+
     private static BookingSourceEvidenceOutboxEntry map(java.sql.ResultSet resultSet)
             throws java.sql.SQLException {
         return new BookingSourceEvidenceOutboxEntry(

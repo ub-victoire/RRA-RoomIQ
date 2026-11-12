@@ -44,6 +44,7 @@ import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.NOT
 import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.NOTIFICATION_DELIVERY_MANAGE;
 import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.AUDIT_READ;
 import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.RETENTION_POLICY_MANAGE;
+import static rw.rra.roomiq.identity.domain.security.IdentityPermissionCodes.LEGAL_HOLD_MANAGE;
 
 @Service("identityAuthorization")
 @Transactional(readOnly = true)
@@ -680,6 +681,12 @@ public class IdentityAuthorizationService {
         UUID userId = actorId(authentication);
         return userId != null && authorization.isActiveSuperAdminWithPermission(userId,
                 UserStatus.ACTIVE, RETENTION_POLICY_MANAGE);
+    }
+
+    public boolean canManageLegalHolds(Authentication authentication) {
+        UUID userId = actorId(authentication);
+        return userId != null && authorization.isActiveSuperAdminWithPermission(userId,
+                UserStatus.ACTIVE, LEGAL_HOLD_MANAGE);
     }
 
     public Optional<AuditSearchAuthorizationResponse> auditSearchAuthorization(

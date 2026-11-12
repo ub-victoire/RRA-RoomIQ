@@ -8,5 +8,9 @@ public record SourceEvidenceEvaluationResult(
         long sourceRevision,
         String sourceEvidenceSha256,
         Instant evidenceReceivedAt,
-        RetentionEvaluationResult evaluation) {
+        RetentionEvaluationResult evaluation,
+        UUID evaluationId,
+        String categoryCode,
+        Instant authoritativeStartAt,
+        Instant evaluationAt) {
 }

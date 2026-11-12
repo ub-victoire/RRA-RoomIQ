@@ -52,18 +52,27 @@ public class IdentityRetentionPolicyAuthorizationClient {
     }
 
     public UUID authorize(String bearerToken, UUID authenticatedUserId, String correlationId) {
+        return authorizeAt(bearerToken, authenticatedUserId, correlationId,
+                "/api/v1/internal/authorization/retention-policy");
+    }
+
+    public UUID authorizeLegalHolds(String bearerToken, UUID authenticatedUserId, String correlationId) {
+        return authorizeAt(bearerToken, authenticatedUserId, correlationId,
+                "/api/v1/internal/authorization/legal-hold");
+    }
+
+    private UUID authorizeAt(String bearerToken, UUID authenticatedUserId, String correlationId, String path) {
         if (!isBearerToken(bearerToken) || authenticatedUserId == null) {
             throw authenticationRequired();
         }
         try {
             RestClient.RequestHeadersSpec<?> request = identityClient.post()
-                    .uri("/api/v1/internal/authorization/retention-policy")
+                    .uri(path)
                     .header(HttpHeaders.AUTHORIZATION, bearerToken);
             if (correlationId != null && !correlationId.isBlank()) {
                 request.header("X-Correlation-ID", correlationId);
             }
-            RetentionPolicyAuthorizationDecision decision =
-                    request.retrieve().body(RetentionPolicyAuthorizationDecision.class);
+            AuthorizationDecision decision = request.retrieve().body(AuthorizationDecision.class);
             if (decision == null || !authenticatedUserId.equals(decision.actorUserId())) {
                 throw unavailable();
             }
@@ -116,6 +125,6 @@ public class IdentityRetentionPolicyAuthorizationClient {
                 "Identity authorization is unavailable; the request cannot proceed");
     }
 
-    private record RetentionPolicyAuthorizationDecision(UUID actorUserId) {
+    private record AuthorizationDecision(UUID actorUserId) {
     }
 }

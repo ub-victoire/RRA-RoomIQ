@@ -22,6 +22,7 @@ import java.security.spec.X509EncodedKeySpec;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -79,10 +80,16 @@ public class BookingSourceEvidenceJwtDecoder implements JwtDecoder {
                 || issuedAt.isAfter(now.plusSeconds(30))
                 || !expiresAt.isAfter(now)
                 || expiresAt.isAfter(issuedAt.plus(MAX_LIFETIME))
-                || !isUuid(jwt.getId())) {
+                || !isUuid(jwt.getId())
+                || !hasIngestionPermission(jwt)) {
             throw new BadJwtException("Booking service token claims are invalid");
         }
         return jwt;
+    }
+
+    private static boolean hasIngestionPermission(Jwt jwt) {
+        Object permissions = jwt.getClaims().get("permissions");
+        return permissions instanceof Collection<?> values && values.contains(PERMISSION);
     }
 
     private String keyLocationFor(String keyId) {

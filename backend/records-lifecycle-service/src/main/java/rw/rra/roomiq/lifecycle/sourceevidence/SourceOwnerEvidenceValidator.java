@@ -1,9 +1,14 @@
 package rw.rra.roomiq.lifecycle.sourceevidence;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 @Component
@@ -12,6 +17,21 @@ public class SourceOwnerEvidenceValidator {
     private static final Pattern RECORD_TYPE = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
     private static final Pattern CATEGORY_CODE = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
     private static final Pattern START_BASIS = Pattern.compile("[A-Z][A-Z0-9_]{0,39}");
+    private final Set<String> allowedBookingCategories;
+
+    @Autowired
+    public SourceOwnerEvidenceValidator(
+            @Value("${roomiq.lifecycle.source-evidence.booking-requests.allowed-categories:}")
+            String allowedBookingCategories) {
+        this.allowedBookingCategories = Arrays.stream(allowedBookingCategories.split(","))
+                .map(String::trim)
+                .filter(value -> !value.isEmpty())
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    SourceOwnerEvidenceValidator() {
+        this("");
+    }
 
     public SourceOwnerEvidence validate(SourceOwnerEvidence evidence, String authenticatedSourceService) {
         require(evidence != null, "Evidence is required");
@@ -28,6 +48,7 @@ public class SourceOwnerEvidenceValidator {
         require(evidence.eventVersion() > 0, "eventVersion must be positive");
         require(evidence.sourceRevision() > 0, "sourceRevision must be positive");
         requireText(evidence.categoryCode(), CATEGORY_CODE, "categoryCode");
+        require(evidence.recordCreatedAt() != null, "recordCreatedAt is required");
         require(evidence.observedAt() != null, "observedAt is required");
         require(!evidence.observedAt().isBefore(evidence.recordCreatedAt()),
                 "observedAt cannot precede recordCreatedAt");
@@ -35,14 +56,25 @@ public class SourceOwnerEvidenceValidator {
         if ("booking-service".equals(evidence.sourceService())) {
             require("BOOKING_REQUEST".equals(evidence.recordType()),
                     "Booking evidence recordType must be BOOKING_REQUEST");
+            require(isUuid(evidence.recordId()), "Booking recordId must be a UUID");
+            require("BOOKING_REQUEST_STATUS_CHANGED".equals(evidence.eventType())
+                            && evidence.eventVersion() == 1,
+                    "Booking evidence event type/version is unsupported");
+            require(allowedBookingCategories.contains(evidence.categoryCode()),
+                    "Booking evidence categoryCode is not configured as supported");
             require(evidence.currentLifecycleStatus() != null
                             && switch (evidence.currentLifecycleStatus()) {
                         case "DRAFT", "PENDING_APPROVAL", "APPROVED", "REJECTED", "CANCELLED", "EXPIRED" -> true;
                         default -> false;
                     },
                     "currentLifecycleStatus is invalid for a Booking request");
+            boolean closed = switch (evidence.currentLifecycleStatus()) {
+                case "REJECTED", "CANCELLED", "EXPIRED" -> true;
+                default -> false;
+            };
+            require(closed == (evidence.closedAt() != null),
+                    "closedAt must match the Booking request lifecycle status");
         }
-        require(evidence.recordCreatedAt() != null, "recordCreatedAt is required");
         require(evidence.occurredAt() != null, "occurredAt is required");
         require(evidence.authoritativeStartAt() != null, "authoritativeStartAt is required");
         requireText(evidence.startBasisCode(), START_BASIS, "startBasisCode");
@@ -93,6 +125,18 @@ public class SourceOwnerEvidenceValidator {
     private static void require(boolean valid, String message) {
         if (!valid) {
             throw new SourceOwnerEvidenceValidationException(message);
+        }
+    }
+
+    private static boolean isUuid(String value) {
+        if (value == null) {
+            return false;
+        }
+        try {
+            UUID.fromString(value);
+            return true;
+        } catch (IllegalArgumentException exception) {
+            return false;
         }
     }
 }

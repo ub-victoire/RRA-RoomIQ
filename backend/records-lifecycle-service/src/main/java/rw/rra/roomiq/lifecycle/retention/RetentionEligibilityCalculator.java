@@ -39,18 +39,22 @@ public class RetentionEligibilityCalculator {
         List<PolicyVersionSnapshot> versions = safeVersions(input.policyVersions());
         List<PolicyVersionSnapshot> effectiveVersions = versions.stream()
                 .filter(Objects::nonNull)
-                .filter(version -> version.status() != null && version.status() != PolicyStatus.DRAFT)
+                .filter(version -> version.status() == PolicyStatus.APPROVED
+                        || version.status() == PolicyStatus.SUPERSEDED)
                 .filter(version -> isEffectiveAt(version, input.authoritativeStartAt()))
                 .toList();
         boolean matchingDraft = versions.stream().filter(Objects::nonNull)
                 .anyMatch(version -> version.status() == PolicyStatus.DRAFT
+                        && isEffectiveAt(version, input.authoritativeStartAt()));
+        boolean matchingWithdrawn = versions.stream().filter(Objects::nonNull)
+                .anyMatch(version -> version.status() == PolicyStatus.WITHDRAWN
                         && isEffectiveAt(version, input.authoritativeStartAt()));
 
         if (effectiveVersions.size() > 1) {
             return notEligible(RetentionEvaluationResult.Reason.CONFLICTING_POLICIES);
         }
         if (effectiveVersions.isEmpty()) {
-            return notEligible(matchingDraft
+            return notEligible(matchingDraft || matchingWithdrawn
                     ? RetentionEvaluationResult.Reason.POLICY_NOT_APPROVED
                     : RetentionEvaluationResult.Reason.NO_APPLICABLE_POLICY);
         }

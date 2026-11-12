@@ -58,8 +58,14 @@ public class LifecycleIdentityAuthorizationFilter extends OncePerRequestFilter {
 
         UUID trustedActor;
         try {
-            trustedActor = identityClient.authorize(request.getHeader("Authorization"), subject,
-                    CorrelationIdFilter.resolveCorrelationId(request));
+            String path = request.getRequestURI().substring(request.getContextPath().length());
+            if (path.equals("/api/v1/legal-holds") || path.startsWith("/api/v1/legal-holds/")) {
+                trustedActor = identityClient.authorizeLegalHolds(request.getHeader("Authorization"), subject,
+                        CorrelationIdFilter.resolveCorrelationId(request));
+            } else {
+                trustedActor = identityClient.authorize(request.getHeader("Authorization"), subject,
+                        CorrelationIdFilter.resolveCorrelationId(request));
+            }
         } catch (DomainException exception) {
             writeError(request, response, exception.status(), exception.code(), exception.getMessage());
             return;

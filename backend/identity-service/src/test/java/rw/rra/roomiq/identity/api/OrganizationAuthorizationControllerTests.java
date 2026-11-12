@@ -241,6 +241,37 @@ class OrganizationAuthorizationControllerTests {
                 .andExpect(status().isForbidden());
     }
 
+    @Test
+    void legalHoldManagementRequiresItsDedicatedPermissionAndGlobalSuperAdminScope() throws Exception {
+        AppUser superAdmin = createUser("hold-super-admin@rra.rw", UserStatus.ACTIVE);
+        Role superAdminRole = roles.findByCodeIgnoreCase("SUPER_ADMIN")
+                .orElseGet(() -> roles.saveAndFlush(new Role("SUPER_ADMIN", "Super Admin", true)));
+        Permission permission = permissions.findByCodeIgnoreCase(
+                IdentityPermissionCodes.LEGAL_HOLD_MANAGE).orElseThrow();
+        rolePermissions.saveAndFlush(new RolePermission(superAdminRole, permission));
+        userRoles.saveAndFlush(new UserRole(superAdmin, superAdminRole, null, null));
+
+        mockMvc.perform(post("/api/v1/internal/authorization/legal-hold")
+                        .with(jwt().jwt(token -> token.subject(superAdmin.getId().toString()))))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .jsonPath("$.actorUserId").value(superAdmin.getId().toString()));
+
+        AppUser withoutPermission = createUser("hold-no-permission@rra.rw", UserStatus.ACTIVE);
+        Role unprivilegedRole = roles.saveAndFlush(new Role(
+                "SUPER_ADMIN_NO_LEGAL_HOLD_PERMISSION", "Super Admin Without Legal Hold Permission", true));
+        userRoles.saveAndFlush(new UserRole(withoutPermission, unprivilegedRole, null, null));
+        mockMvc.perform(post("/api/v1/internal/authorization/legal-hold")
+                        .with(jwt().jwt(token -> token.subject(withoutPermission.getId().toString()))))
+                .andExpect(status().isForbidden());
+
+        AppUser scopedSuperAdmin = createUser("hold-scoped-admin@rra.rw", UserStatus.ACTIVE);
+        userRoles.saveAndFlush(new UserRole(scopedSuperAdmin, superAdminRole, UUID.randomUUID(), null));
+        mockMvc.perform(post("/api/v1/internal/authorization/legal-hold")
+                        .with(jwt().jwt(token -> token.subject(scopedSuperAdmin.getId().toString()))))
+                .andExpect(status().isForbidden());
+    }
+
     private AppUser createUser(String email, UserStatus status) {
         AppUser user = new AppUser(email, "Organization Authorization Test", status);
         return users.saveAndFlush(user);

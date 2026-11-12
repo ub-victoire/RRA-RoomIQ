@@ -2,6 +2,7 @@ package rw.rra.roomiq.booking.domain.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -30,6 +31,7 @@ public class BookingSourceEvidenceOutboxRelay {
     private final BookingSourceEvidenceOutboxService outboxService;
     private final Clock clock;
 
+    @Autowired
     public BookingSourceEvidenceOutboxRelay(BookingSourceEvidenceOutboxRepository repository,
                                             BookingSourceEvidenceProperties properties,
                                             BookingSourceEvidenceDeliveryClient deliveryClient,

@@ -28,10 +28,12 @@ public class BookingSourceEvidenceController {
         } catch (SourceOwnerEvidenceValidationException exception) {
             throw new DomainException(HttpStatus.BAD_REQUEST, "SOURCE_EVIDENCE_INVALID", exception.getMessage());
         }
-        return switch (result.outcome()) {
-            case ACCEPTED -> ResponseEntity.status(HttpStatus.CREATED).body(result);
-            case DUPLICATE -> ResponseEntity.ok(result);
-            case STALE, CONFLICTED -> ResponseEntity.status(HttpStatus.CONFLICT).body(result);
-        };
+        if (result.outcome() == SourceOwnerEvidenceOutcome.ACCEPTED) {
+            return ResponseEntity.status(HttpStatus.CREATED).body(result);
+        }
+        if (result.outcome() == SourceOwnerEvidenceOutcome.DUPLICATE) {
+            return ResponseEntity.ok(result);
+        }
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(result);
     }
 }

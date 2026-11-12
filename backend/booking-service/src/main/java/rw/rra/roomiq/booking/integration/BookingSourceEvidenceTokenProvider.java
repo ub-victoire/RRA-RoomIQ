@@ -5,6 +5,7 @@ import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.proc.SecurityContext;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.http.HttpStatus;
@@ -43,6 +44,7 @@ public class BookingSourceEvidenceTokenProvider {
     private final String privateKeyLocation;
     private final Clock clock;
 
+    @Autowired
     public BookingSourceEvidenceTokenProvider(
             ResourceLoader resourceLoader,
             @Value("${roomiq.booking.service-auth.issuer:}") String issuer,

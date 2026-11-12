@@ -47,8 +47,14 @@ Create permission rows through the Super Admin API after bootstrap. These stable
 - `NOTIFICATION_TEMPLATE_MANAGE`: manage Notification templates as an active global Super Admin.
 - `NOTIFICATION_DELIVERY_MANAGE`: inspect aggregate email delivery operations and idempotently redrive dead letters as an active global Super Admin.
 - `AUDIT_READ`: authorize Audit Search for an active global Super Admin or an active building-scoped Admin with trusted assigned building scopes.
+- `BOOKING_SOURCE_EVIDENCE_PUBLISH`: dedicated capability name for Booking's internal RLC evidence-ingestion token.
+- `LEGAL_HOLD_MANAGE`: manage the RLC legal-hold registry as an active global Super Admin. Flyway V8 catalogues the permission but does not assign it to any role or user; production assignment requires an explicit authorization decision and controlled provisioning.
 
 `CG_BOOKING` remains a separate time-bounded privilege, not a role or permission. It permits eligible booking workflows for VIP rooms only when the user's account, scope, room rules, and all scheduling constraints also allow it.
+
+`BOOKING_SOURCE_EVIDENCE_PUBLISH` is cataloged by Flyway V7 and is not granted to a user role. In the provisional S8-06 Booking-to-RLC integration, Booking signs a short-lived RS256 workload token locally and RLC validates its pinned key, issuer, exact audience, `booking-service` subject, expiry, and signed permission claim. Identity does not issue this workload token or make a runtime authorization decision for the delivery; production workload-key provisioning and RRA review remain outstanding.
+
+`POST /api/v1/internal/authorization/legal-hold` derives the actor from the authenticated bearer token and checks current active-account, global `SUPER_ADMIN`, and explicit `LEGAL_HOLD_MANAGE` state. RLC uses the returned actor ID and never trusts an actor identifier from the hold request. No role assignment is included in Flyway V8, so the capability remains unavailable until provisioned through an authorized process.
 
 ## Role policy
 

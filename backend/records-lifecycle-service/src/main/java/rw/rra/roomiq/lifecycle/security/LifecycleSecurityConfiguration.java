@@ -1,6 +1,7 @@
 package rw.rra.roomiq.lifecycle.security;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.core.annotation.Order;
 import org.springframework.context.annotation.Bean;
@@ -10,6 +11,7 @@ import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
@@ -49,7 +51,8 @@ public class LifecycleSecurityConfiguration {
     @Bean
     @Order(1)
     public SecurityFilterChain bookingEvidenceSecurityFilterChain(
-            HttpSecurity http, BookingSourceEvidenceJwtDecoder bookingSourceEvidenceJwtDecoder) throws Exception {
+            HttpSecurity http, BookingSourceEvidenceJwtDecoder bookingSourceEvidenceJwtDecoder,
+            BookingSourceEvidencePayloadFilter payloadFilter) throws Exception {
         JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
         converter.setJwtGrantedAuthoritiesConverter(jwt -> {
             Object permissions = jwt.getClaims().get("permissions");
@@ -58,7 +61,7 @@ public class LifecycleSecurityConfiguration {
             }
             return values.stream()
                     .filter(BookingSourceEvidenceJwtDecoder.PERMISSION::equals)
-                    .map(value -> new SimpleGrantedAuthority("SCOPE_" + value))
+                    .<GrantedAuthority>map(value -> new SimpleGrantedAuthority("SCOPE_" + value))
                     .toList();
         });
         return http
@@ -77,6 +80,7 @@ public class LifecycleSecurityConfiguration {
                                 response.sendError(401, "Booking service authentication is required"))
                         .jwt(jwt -> jwt.decoder(bookingSourceEvidenceJwtDecoder)
                                 .jwtAuthenticationConverter(converter)))
+                .addFilterBefore(payloadFilter, BearerTokenAuthenticationFilter.class)
                 .build();
     }
 
@@ -84,7 +88,8 @@ public class LifecycleSecurityConfiguration {
     @Order(2)
     public SecurityFilterChain lifecycleSecurityFilterChain(
             HttpSecurity http, LifecycleIdentityAuthorizationFilter authorizationFilter,
-            ObjectMapper objectMapper) throws Exception {
+            ObjectMapper objectMapper, @Qualifier("lifecycleJwtDecoder") JwtDecoder lifecycleJwtDecoder)
+            throws Exception {
         return http
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -98,7 +103,7 @@ public class LifecycleSecurityConfiguration {
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .authenticationEntryPoint((request, response, exception) ->
                                 response.sendError(401, "Authentication is required"))
-                        .jwt(Customizer.withDefaults()))
+                        .jwt(jwt -> jwt.decoder(lifecycleJwtDecoder)))
                 .addFilterAfter(authorizationFilter, BearerTokenAuthenticationFilter.class)
                 .build();
     }
@@ -107,6 +112,15 @@ public class LifecycleSecurityConfiguration {
     public FilterRegistrationBean<LifecycleIdentityAuthorizationFilter> lifecycleIdentityFilterRegistration(
             LifecycleIdentityAuthorizationFilter filter) {
         FilterRegistrationBean<LifecycleIdentityAuthorizationFilter> registration =
+                new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
+    public FilterRegistrationBean<BookingSourceEvidencePayloadFilter> bookingEvidencePayloadFilterRegistration(
+            BookingSourceEvidencePayloadFilter filter) {
+        FilterRegistrationBean<BookingSourceEvidencePayloadFilter> registration =
                 new FilterRegistrationBean<>(filter);
         registration.setEnabled(false);
         return registration;

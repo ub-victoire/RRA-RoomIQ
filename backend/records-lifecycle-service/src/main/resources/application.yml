@@ -58,3 +58,8 @@ roomiq:
     url: ${IDENTITY_SERVICE_URL}
     connect-timeout: ${IDENTITY_CONNECT_TIMEOUT:2s}
     read-timeout: ${IDENTITY_READ_TIMEOUT:5s}
+  lifecycle:
+    source-evidence:
+      max-age: ${RLC_SOURCE_EVIDENCE_MAX_AGE:PT24H}
+      booking-requests:
+        allowed-categories: ${RLC_BOOKING_SOURCE_EVIDENCE_ALLOWED_CATEGORIES:}

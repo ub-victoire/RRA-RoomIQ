@@ -155,6 +155,30 @@ class RetentionEligibilityCalculatorTests {
     }
 
     @Test
+    void withdrawnOverlappingVersionDoesNotConflictWithAnApplicableApprovedVersion() {
+        PolicyVersionSnapshot withdrawn = new PolicyVersionSnapshot(
+                UUID.randomUUID(), "withdrawn", PolicyStatus.WITHDRAWN, POLICY_FROM, POLICY_TO);
+        RetentionEvaluationResult result = calculator.evaluate(input(
+                POLICY_FROM, Instant.parse("2040-01-01T00:00:00Z"),
+                List.of(version(POLICY_FROM, POLICY_TO), withdrawn), List.of(rule("ACCESS", 1, "DAY")),
+                Map.of("ORIGINAL_EVENT", POLICY_FROM), List.of()));
+
+        assertThat(result.eligible()).isTrue();
+        assertThat(result.policyVersionId()).isEqualTo(POLICY_ID);
+    }
+
+    @Test
+    void futureEffectivePolicyCannotBeSelected() {
+        Instant futureEffectiveFrom = Instant.parse("2028-01-01T00:00:00Z");
+        RetentionEvaluationResult result = calculator.evaluate(input(
+                futureEffectiveFrom.minusNanos(1), Instant.parse("2040-01-01T00:00:00Z"),
+                List.of(version(futureEffectiveFrom, null)), List.of(rule("ACCESS", 1, "DAY")),
+                Map.of("ORIGINAL_EVENT", futureEffectiveFrom.minusNanos(1)), List.of()));
+
+        assertThat(result.reason()).isEqualTo(RetentionEvaluationResult.Reason.NO_APPLICABLE_POLICY);
+    }
+
+    @Test
     void unknownCategoryAndMissingAuthoritativeTimestampFailClosed() {
         assertThat(calculator.evaluate(input(
                 POLICY_FROM, Instant.parse("2040-01-01T00:00:00Z"), List.of(), List.of(), Map.of(), List.of()))
