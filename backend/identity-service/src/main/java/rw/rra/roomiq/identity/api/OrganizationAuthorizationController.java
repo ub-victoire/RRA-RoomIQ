@@ -20,7 +20,7 @@ import rw.rra.roomiq.identity.domain.dto.MeetingAuthorizationResponse;
 import rw.rra.roomiq.identity.domain.dto.NotificationTemplateAuthorizationResponse;
 import rw.rra.roomiq.identity.domain.dto.NotificationDeliveryAuthorizationResponse;
 import rw.rra.roomiq.identity.domain.dto.RetentionPolicyAuthorizationResponse;
-import rw.rra.roomiq.identity.domain.dto.LegalHoldAuthorizationResponse;
+import rw.rra.roomiq.identity.domain.dto.RecordsHoldAuthorizationResponse;
 import rw.rra.roomiq.identity.domain.dto.RoomManagementAuthorizationRequest;
 import rw.rra.roomiq.identity.domain.dto.RoomManagementAuthorizationResponse;
 import rw.rra.roomiq.identity.domain.dto.SchedulingAuthorizationRequest;
@@ -180,15 +180,15 @@ public class OrganizationAuthorizationController {
     }
 
     @PostMapping("/legal-hold")
-    @Operation(summary = "Authorize legal-hold registry management",
-            description = "Requires the authenticated active user to hold the global SUPER_ADMIN role and explicit LEGAL_HOLD_MANAGE permission. The permission is not assigned by this migration.")
-    public ResponseEntity<LegalHoldAuthorizationResponse> authorizeLegalHoldManagement(
+    @Operation(summary = "Authorize legal-hold record management",
+            description = "Requires the authenticated active user to hold the global SUPER_ADMIN role and explicit RECORDS_HOLD_MANAGE permission.")
+    public ResponseEntity<RecordsHoldAuthorizationResponse> authorizeRecordsHoldManagement(
             Authentication authentication) {
         UUID actorUserId = authorization.authenticatedUserId(authentication);
-        if (actorUserId == null || !authorization.canManageLegalHolds(authentication)) {
-            throw new AccessDeniedException("Legal-hold management is denied");
+        if (actorUserId == null || !authorization.canManageRecordsHolds(authentication)) {
+            throw new AccessDeniedException("Records hold management is denied");
         }
-        return ResponseEntity.ok(new LegalHoldAuthorizationResponse(actorUserId));
+        return ResponseEntity.ok(new RecordsHoldAuthorizationResponse(actorUserId));
     }
 
     @PostMapping("/audit-search")

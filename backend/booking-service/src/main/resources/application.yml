@@ -29,6 +29,13 @@ spring:
 server:
   port: ${BOOKING_SERVICE_PORT:8085}
 roomiq:
+  auth:
+    records-lifecycle-service-token:
+      issuer: ${RLC_SERVICE_TOKEN_ISSUER:}
+      current-key-id: ${RLC_SERVICE_TOKEN_CURRENT_KEY_ID:}
+      current-public-key-location: ${RLC_SERVICE_TOKEN_CURRENT_PUBLIC_KEY_LOCATION:}
+      previous-key-id: ${RLC_SERVICE_TOKEN_PREVIOUS_KEY_ID:}
+      previous-public-key-location: ${RLC_SERVICE_TOKEN_PREVIOUS_PUBLIC_KEY_LOCATION:}
   identity:
     url: ${IDENTITY_SERVICE_URL:http://localhost:8081}
   organization:

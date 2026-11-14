@@ -161,7 +161,8 @@ public class RetentionEligibilityCalculator {
 
     private static boolean blocksDisposal(HoldStatus status) {
         return status == null || switch (status) {
-            case PENDING_BLOCK, ACTIVE, RELEASE_PENDING, CONFLICTED, UNACKNOWLEDGED, UNKNOWN -> true;
+            case PENDING_BLOCK, ACTIVE, RELEASE_PENDING, RELEASE_ENFORCEMENT_PENDING,
+                    CONFLICTED, UNACKNOWLEDGED, UNKNOWN -> true;
             case RELEASED, REJECTED -> false;
         };
     }

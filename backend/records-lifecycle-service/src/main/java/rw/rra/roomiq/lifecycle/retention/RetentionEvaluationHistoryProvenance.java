@@ -1,7 +1,6 @@
 package rw.rra.roomiq.lifecycle.retention;
 
 import rw.rra.roomiq.lifecycle.sourceevidence.SourceOwnerEvidence;
-import rw.rra.roomiq.lifecycle.legalhold.ApplicableLegalHold;
 
 import java.time.Instant;
 import java.util.List;
@@ -22,7 +21,7 @@ public record RetentionEvaluationHistoryProvenance(
         Map<String, ExternalScheduleResult> externalScheduleResultsByRuleCode,
         boolean holdStateAvailable,
         List<HoldStatus> holdStatuses,
-        List<ApplicableLegalHold> applicableHolds,
+        List<RecordsHoldEvaluationProvenance> holdEvidence,
         RetentionEvaluationEvidence evaluationInput,
         List<PolicyVersionProvenance> candidatePolicyVersions,
         List<RetentionRuleSnapshot> candidateRules,

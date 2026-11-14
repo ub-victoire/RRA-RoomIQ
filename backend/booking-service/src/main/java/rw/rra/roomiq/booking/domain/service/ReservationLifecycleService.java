@@ -66,6 +66,7 @@ public class ReservationLifecycleService {
     @Transactional
     public ReservationLifecycleResponse checkIn(UUID reservationId) {
         Reservation reservation = lockReservation(reservationId);
+        reservations.requireNoActiveLegalHold(reservation.getId());
         authorize(reservation);
         if (!reservation.checkIn(serverTimestamp())) {
             throw invalidTransition();
@@ -76,6 +77,7 @@ public class ReservationLifecycleService {
     @Transactional
     public ReservationLifecycleResponse complete(UUID reservationId) {
         Reservation reservation = lockReservation(reservationId);
+        reservations.requireNoActiveLegalHold(reservation.getId());
         authorize(reservation);
         if (!reservation.complete(serverTimestamp())) {
             throw invalidTransition();
@@ -101,6 +103,7 @@ public class ReservationLifecycleService {
     @Transactional
     public ReservationLifecycleResponse release(UUID reservationId) {
         Reservation reservation = lockReservation(reservationId);
+        reservations.requireNoActiveLegalHold(reservation.getId());
         UUID actor = authorize(reservation);
         var meeting = meetings.findByReservation_Id(reservation.getId()).orElseThrow(() ->
                 new DomainException(HttpStatus.SERVICE_UNAVAILABLE, "BOOKING_MEETING_INCONSISTENT",

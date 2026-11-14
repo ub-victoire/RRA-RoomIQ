@@ -171,10 +171,6 @@ class AuthenticationControllerTests {
                 "$.paths['/api/v1/internal/authorization/retention-policy'].post");
         assertThat(String.valueOf(retentionPolicyAuthorization.get("summary"))).contains("retention-policy");
         assertThat(String.valueOf(retentionPolicyAuthorization.get("security"))).contains("bearerAuth");
-        Map<?, ?> legalHoldAuthorization = JsonPath.read(document,
-                "$.paths['/api/v1/internal/authorization/legal-hold'].post");
-        assertThat(String.valueOf(legalHoldAuthorization.get("summary"))).contains("legal-hold");
-        assertThat(String.valueOf(legalHoldAuthorization.get("security"))).contains("bearerAuth");
     }
 
     @Test

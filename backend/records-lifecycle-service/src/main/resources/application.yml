@@ -54,6 +54,10 @@ roomiq:
       current-public-key-location: ${BOOKING_SOURCE_EVIDENCE_CURRENT_PUBLIC_KEY_LOCATION:}
       previous-key-id: ${BOOKING_SOURCE_EVIDENCE_PREVIOUS_KEY_ID:}
       previous-public-key-location: ${BOOKING_SOURCE_EVIDENCE_PREVIOUS_PUBLIC_KEY_LOCATION:}
+    records-lifecycle-service-token:
+      issuer: ${RLC_SERVICE_TOKEN_ISSUER:}
+      key-id: ${RLC_SERVICE_TOKEN_KEY_ID:}
+      private-key-location: ${RLC_SERVICE_TOKEN_PRIVATE_KEY_LOCATION:}
   identity:
     url: ${IDENTITY_SERVICE_URL}
     connect-timeout: ${IDENTITY_CONNECT_TIMEOUT:2s}
@@ -63,3 +67,12 @@ roomiq:
       max-age: ${RLC_SOURCE_EVIDENCE_MAX_AGE:PT24H}
       booking-requests:
         allowed-categories: ${RLC_BOOKING_SOURCE_EVIDENCE_ALLOWED_CATEGORIES:}
+    booking-hold-instructions:
+      enabled: ${RLC_BOOKING_HOLD_DELIVERY_ENABLED:true}
+      url: ${BOOKING_SERVICE_URL:}
+      connect-timeout: ${BOOKING_HOLD_CONNECT_TIMEOUT:2s}
+      read-timeout: ${BOOKING_HOLD_READ_TIMEOUT:5s}
+      delivery-interval: ${BOOKING_HOLD_DELIVERY_INTERVAL:PT10S}
+      lease-duration: ${BOOKING_HOLD_LEASE_DURATION:PT30S}
+      batch-size: ${BOOKING_HOLD_DELIVERY_BATCH_SIZE:20}
+      max-attempts: ${BOOKING_HOLD_MAX_ATTEMPTS:12}

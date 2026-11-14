@@ -58,20 +58,22 @@ public class LifecycleIdentityAuthorizationFilter extends OncePerRequestFilter {
 
         UUID trustedActor;
         try {
-            String path = request.getRequestURI().substring(request.getContextPath().length());
-            if (path.equals("/api/v1/legal-holds") || path.startsWith("/api/v1/legal-holds/")) {
-                trustedActor = identityClient.authorizeLegalHolds(request.getHeader("Authorization"), subject,
-                        CorrelationIdFilter.resolveCorrelationId(request));
-            } else {
-                trustedActor = identityClient.authorize(request.getHeader("Authorization"), subject,
-                        CorrelationIdFilter.resolveCorrelationId(request));
-            }
+            trustedActor = isLegalHoldRequest(request)
+                    ? identityClient.authorizeRecordsHolds(request.getHeader("Authorization"), subject,
+                            CorrelationIdFilter.resolveCorrelationId(request))
+                    : identityClient.authorize(request.getHeader("Authorization"), subject,
+                            CorrelationIdFilter.resolveCorrelationId(request));
         } catch (DomainException exception) {
             writeError(request, response, exception.status(), exception.code(), exception.getMessage());
             return;
         }
         request.setAttribute(ACTOR_ATTRIBUTE, trustedActor);
         filterChain.doFilter(request, response);
+    }
+
+    private static boolean isLegalHoldRequest(HttpServletRequest request) {
+        String path = request.getRequestURI().substring(request.getContextPath().length());
+        return path.equals("/api/v1/legal-holds") || path.startsWith("/api/v1/legal-holds/");
     }
 
     private void writeError(HttpServletRequest request, HttpServletResponse response, HttpStatus status,

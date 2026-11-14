@@ -85,6 +85,7 @@ public class BookingDecisionService {
         BookingRequest bookingRequest = bookingRequests.findByIdForUpdate(bookingRequestId)
                 .orElseThrow(() -> new DomainException(HttpStatus.NOT_FOUND, "BOOKING_REQUEST_NOT_FOUND",
                         "Booking request was not found"));
+        bookingRequests.requireNoActiveLegalHold(bookingRequestId);
         BookingAuthorizationResponse authorization = authorizationClient.authorizeApproval(
                 bookingRequest.getRequestedByUserId(), bookingRequest.getOfficeBuildingId());
         UUID actor = authorization == null ? null : authorization.actorUserId();

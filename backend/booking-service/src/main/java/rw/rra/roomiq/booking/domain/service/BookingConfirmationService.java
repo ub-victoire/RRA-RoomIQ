@@ -92,6 +92,7 @@ public class BookingConfirmationService {
             throw new DomainException(HttpStatus.UNPROCESSABLE_CONTENT, "BOOKING_REQUESTER_IDENTITY_INVALID",
                     "The current requester identity is unavailable or inconsistent");
         }
+        bookingRequests.requireNoActiveLegalHold(bookingRequest.getId());
 
         ValidatedBookingReferences references = ownerServicesClient.validateRequest(
                 new BookingRequestFacts(bookingRequest.getDepartmentId(), bookingRequest.getRoomId(),

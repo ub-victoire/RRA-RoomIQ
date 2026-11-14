@@ -52,16 +52,16 @@ public class IdentityRetentionPolicyAuthorizationClient {
     }
 
     public UUID authorize(String bearerToken, UUID authenticatedUserId, String correlationId) {
-        return authorizeAt(bearerToken, authenticatedUserId, correlationId,
-                "/api/v1/internal/authorization/retention-policy");
+        return authorizeAt("/api/v1/internal/authorization/retention-policy", bearerToken,
+                authenticatedUserId, correlationId);
     }
 
-    public UUID authorizeLegalHolds(String bearerToken, UUID authenticatedUserId, String correlationId) {
-        return authorizeAt(bearerToken, authenticatedUserId, correlationId,
-                "/api/v1/internal/authorization/legal-hold");
+    public UUID authorizeRecordsHolds(String bearerToken, UUID authenticatedUserId, String correlationId) {
+        return authorizeAt("/api/v1/internal/authorization/legal-hold", bearerToken,
+                authenticatedUserId, correlationId);
     }
 
-    private UUID authorizeAt(String bearerToken, UUID authenticatedUserId, String correlationId, String path) {
+    private UUID authorizeAt(String path, String bearerToken, UUID authenticatedUserId, String correlationId) {
         if (!isBearerToken(bearerToken) || authenticatedUserId == null) {
             throw authenticationRequired();
         }

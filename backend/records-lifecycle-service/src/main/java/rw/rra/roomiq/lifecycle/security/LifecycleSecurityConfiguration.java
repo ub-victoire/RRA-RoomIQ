@@ -88,6 +88,7 @@ public class LifecycleSecurityConfiguration {
     @Order(2)
     public SecurityFilterChain lifecycleSecurityFilterChain(
             HttpSecurity http, LifecycleIdentityAuthorizationFilter authorizationFilter,
+            RecordsHoldPayloadFilter recordsHoldPayloadFilter,
             ObjectMapper objectMapper, @Qualifier("lifecycleJwtDecoder") JwtDecoder lifecycleJwtDecoder)
             throws Exception {
         return http
@@ -104,6 +105,7 @@ public class LifecycleSecurityConfiguration {
                         .authenticationEntryPoint((request, response, exception) ->
                                 response.sendError(401, "Authentication is required"))
                         .jwt(jwt -> jwt.decoder(lifecycleJwtDecoder)))
+                .addFilterBefore(recordsHoldPayloadFilter, BearerTokenAuthenticationFilter.class)
                 .addFilterAfter(authorizationFilter, BearerTokenAuthenticationFilter.class)
                 .build();
     }
@@ -122,6 +124,14 @@ public class LifecycleSecurityConfiguration {
             BookingSourceEvidencePayloadFilter filter) {
         FilterRegistrationBean<BookingSourceEvidencePayloadFilter> registration =
                 new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
+    public FilterRegistrationBean<RecordsHoldPayloadFilter> recordsHoldPayloadFilterRegistration(
+            RecordsHoldPayloadFilter filter) {
+        FilterRegistrationBean<RecordsHoldPayloadFilter> registration = new FilterRegistrationBean<>(filter);
         registration.setEnabled(false);
         return registration;
     }

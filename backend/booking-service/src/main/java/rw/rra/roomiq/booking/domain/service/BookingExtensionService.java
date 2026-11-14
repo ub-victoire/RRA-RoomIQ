@@ -350,9 +350,11 @@ public class BookingExtensionService {
             throw new DomainException(HttpStatus.BAD_REQUEST, "RESERVATION_ID_INVALID",
                     "A reservation identifier is required");
         }
-        return reservations.findByIdForUpdate(reservationId)
+        Reservation reservation = reservations.findByIdForUpdate(reservationId)
                 .orElseThrow(() -> new DomainException(HttpStatus.NOT_FOUND, "RESERVATION_NOT_FOUND",
                         "Reservation was not found"));
+        reservations.requireNoActiveLegalHold(reservationId);
+        return reservation;
     }
 
     private BookingExtension lockExtension(UUID extensionId) {

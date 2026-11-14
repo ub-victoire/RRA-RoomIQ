@@ -86,6 +86,7 @@ public class BookingCancellationService {
         validate(requestId, request);
         BookingRequest bookingRequest = bookingRequests.findByIdForUpdate(requestId)
                 .orElseThrow(() -> notFound("BOOKING_REQUEST_NOT_FOUND", "Booking request was not found"));
+        bookingRequests.requireNoActiveLegalHold(requestId);
         BookingAuthorizationResponse authorization = authorizationClient.authorizeCancellation(
                 bookingRequest.getRequestedByUserId(), bookingRequest.getOfficeBuildingId());
         Cancellation prior = cancellations.findFirstByBookingRequest_IdOrderByCancelledAtDesc(requestId)
@@ -131,6 +132,7 @@ public class BookingCancellationService {
                 .orElseThrow(() -> notFound("RESERVATION_NOT_FOUND", "Reservation was not found"));
         BookingRequest bookingRequest = bookingRequests.findByIdForUpdate(reservation.getBookingRequest().getId())
                 .orElseThrow(() -> notFound("BOOKING_REQUEST_NOT_FOUND", "Booking request was not found"));
+        bookingRequests.requireNoActiveLegalHold(bookingRequest.getId());
         BookingAuthorizationResponse authorization = authorizationClient.authorizeCancellation(
                 reservation.getOrganizerUserId(), bookingRequest.getOfficeBuildingId());
         Cancellation prior = cancellations.findFirstByReservation_IdOrderByCancelledAtDesc(reservationId)

@@ -1,15 +1,9 @@
 package rw.rra.roomiq.lifecycle.retention;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.dao.DataAccessException;
-import rw.rra.roomiq.lifecycle.legalhold.LegalHoldEvaluationState;
-import rw.rra.roomiq.lifecycle.legalhold.LegalHoldEventWriter;
-import rw.rra.roomiq.lifecycle.legalhold.LegalHoldRepository;
 import rw.rra.roomiq.lifecycle.policy.LifecyclePolicyRule;
 import rw.rra.roomiq.lifecycle.policy.LifecyclePolicyRuleRepository;
 import rw.rra.roomiq.lifecycle.policy.LifecyclePolicyVersion;
@@ -19,6 +13,8 @@ import rw.rra.roomiq.lifecycle.policy.PolicyStatus;
 import rw.rra.roomiq.lifecycle.policy.RetentionDurationUnit;
 import rw.rra.roomiq.lifecycle.sourceevidence.SourceOwnerEvidenceReceipt;
 import rw.rra.roomiq.lifecycle.sourceevidence.SourceOwnerEvidenceRepository;
+import rw.rra.roomiq.lifecycle.holdcontrol.RecordsHoldRepository;
+import rw.rra.roomiq.lifecycle.holdcontrol.RecordsLegalHold;
 
 import java.util.List;
 import java.util.HashMap;
@@ -30,14 +26,12 @@ import java.util.UUID;
 
 @Service
 public class RetentionPolicyEvaluationService {
-    private static final Logger log = LoggerFactory.getLogger(RetentionPolicyEvaluationService.class);
     private final LifecyclePolicyVersionRepository versionRepository;
     private final LifecyclePolicyRuleRepository ruleRepository;
     private final RetentionEligibilityCalculator calculator;
     private final SourceOwnerEvidenceRepository sourceEvidenceRepository;
+    private final RecordsHoldRepository recordsHoldRepository;
     private final RetentionEvaluationHistoryRepository historyRepository;
-    private final LegalHoldRepository legalHoldRepository;
-    private final LegalHoldEventWriter legalHoldEventWriter;
     private final Duration sourceEvidenceMaxAge;
     private final Clock clock;
 
@@ -46,30 +40,27 @@ public class RetentionPolicyEvaluationService {
                                             LifecyclePolicyRuleRepository ruleRepository,
                                             RetentionEligibilityCalculator calculator,
                                             SourceOwnerEvidenceRepository sourceEvidenceRepository,
+                                            RecordsHoldRepository recordsHoldRepository,
                                             RetentionEvaluationHistoryRepository historyRepository,
-                                            LegalHoldRepository legalHoldRepository,
-                                            LegalHoldEventWriter legalHoldEventWriter,
                                             @Value("${roomiq.lifecycle.source-evidence.max-age:PT24H}")
                                             Duration sourceEvidenceMaxAge) {
-        this(versionRepository, ruleRepository, calculator, sourceEvidenceRepository, historyRepository,
-                legalHoldRepository, legalHoldEventWriter, sourceEvidenceMaxAge, Clock.systemUTC());
+        this(versionRepository, ruleRepository, calculator, sourceEvidenceRepository, recordsHoldRepository,
+                historyRepository, sourceEvidenceMaxAge, Clock.systemUTC());
     }
 
     RetentionPolicyEvaluationService(LifecyclePolicyVersionRepository versionRepository,
                                      LifecyclePolicyRuleRepository ruleRepository,
                                      RetentionEligibilityCalculator calculator,
                                      SourceOwnerEvidenceRepository sourceEvidenceRepository,
+                                     RecordsHoldRepository recordsHoldRepository,
                                      RetentionEvaluationHistoryRepository historyRepository,
-                                     LegalHoldRepository legalHoldRepository,
-                                     LegalHoldEventWriter legalHoldEventWriter,
                                      Duration sourceEvidenceMaxAge, Clock clock) {
         this.versionRepository = versionRepository;
         this.ruleRepository = ruleRepository;
         this.calculator = calculator;
         this.sourceEvidenceRepository = sourceEvidenceRepository;
+        this.recordsHoldRepository = recordsHoldRepository;
         this.historyRepository = historyRepository;
-        this.legalHoldRepository = legalHoldRepository;
-        this.legalHoldEventWriter = legalHoldEventWriter;
         if (sourceEvidenceMaxAge.isNegative() || sourceEvidenceMaxAge.isZero()) {
             throw new IllegalArgumentException("Source evidence max age must be positive");
         }
@@ -123,14 +114,17 @@ public class RetentionPolicyEvaluationService {
             Long acknowledgedSourceRevision,
             Map<String, ExternalScheduleResult> externalScheduleResultsByRuleCode) {
         sourceEvidenceRepository.lockRecord(sourceService, recordType, recordId);
-        SourceOwnerEvidenceReceipt receipt = sourceEvidenceRepository
-                .findLatestAccepted(sourceService, recordType, recordId).orElse(null);
-        LegalHoldEvaluationState holdState = loadApplicableHolds(sourceService, recordType, recordId,
-                receipt == null ? null : receipt.evidence().categoryCode());
-        if (receipt == null) {
-            return recordEvaluation(sourceService, recordType, recordId, null, acknowledgedSourceRevision,
-                    evaluationAt, externalScheduleResultsByRuleCode, holdState, null,
-                    failedEvaluation(RetentionEvaluationResult.Reason.SOURCE_EVIDENCE_MISSING));
+            List<RecordsLegalHold> holds = recordsHoldRepository.findHolds(sourceService, recordType, recordId);
+            List<HoldStatus> holdStatuses = holds.stream()
+                    .map(hold -> HoldStatus.valueOf(hold.status().name())).toList();
+            List<RecordsHoldEvaluationProvenance> holdEvidence = holds.stream()
+                    .map(RecordsHoldEvaluationProvenance::from).toList();
+            SourceOwnerEvidenceReceipt receipt = sourceEvidenceRepository
+                    .findLatestAccepted(sourceService, recordType, recordId).orElse(null);
+            if (receipt == null) {
+                return recordEvaluation(sourceService, recordType, recordId, null, acknowledgedSourceRevision,
+                        evaluationAt, externalScheduleResultsByRuleCode, holdStatuses, holdEvidence, null,
+                        failedEvaluation(RetentionEvaluationResult.Reason.SOURCE_EVIDENCE_MISSING));
         }
 
         Long latestConflictRevision = sourceEvidenceRepository
@@ -138,20 +132,20 @@ public class RetentionPolicyEvaluationService {
         if (latestConflictRevision != null
                 && latestConflictRevision >= receipt.evidence().sourceRevision()) {
             return recordEvaluation(sourceService, recordType, recordId, receipt, acknowledgedSourceRevision,
-                    evaluationAt, externalScheduleResultsByRuleCode, holdState, null,
+                    evaluationAt, externalScheduleResultsByRuleCode, holdStatuses, holdEvidence, null,
                     failedEvaluation(RetentionEvaluationResult.Reason.SOURCE_EVIDENCE_CONFLICT));
         }
 
         if (receipt.receivedAt().isBefore(clock.instant().minus(sourceEvidenceMaxAge))) {
             return recordEvaluation(sourceService, recordType, recordId, receipt, acknowledgedSourceRevision,
-                    evaluationAt, externalScheduleResultsByRuleCode, holdState, null,
+                    evaluationAt, externalScheduleResultsByRuleCode, holdStatuses, holdEvidence, null,
                     failedEvaluation(RetentionEvaluationResult.Reason.SOURCE_EVIDENCE_STALE));
         }
 
         if (acknowledgedSourceRevision == null
                 || acknowledgedSourceRevision != receipt.evidence().sourceRevision()) {
             return recordEvaluation(sourceService, recordType, recordId, receipt, acknowledgedSourceRevision,
-                    evaluationAt, externalScheduleResultsByRuleCode, holdState, null,
+                    evaluationAt, externalScheduleResultsByRuleCode, holdStatuses, holdEvidence, null,
                     failedEvaluation(RetentionEvaluationResult.Reason.OWNER_UNACKNOWLEDGED));
         }
 
@@ -169,23 +163,11 @@ public class RetentionPolicyEvaluationService {
 
         RetentionEvaluationEvidence evaluationInput = new RetentionEvaluationEvidence(
                 true, true, sourceEvidence.categoryCode(), sourceEvidence.authoritativeStartAt(), evaluationAt,
-                starts, externalScheduleResultsByRuleCode, holdState.available(), holdState.statuses());
+                starts, externalScheduleResultsByRuleCode, true, holdStatuses);
         EvaluationContext context = compute(evaluationInput);
         return recordEvaluation(sourceService, recordType, recordId, receipt, acknowledgedSourceRevision,
-                evaluationAt, externalScheduleResultsByRuleCode, holdState,
+                evaluationAt, externalScheduleResultsByRuleCode, holdStatuses, holdEvidence,
                 evaluationInput, context);
-    }
-
-    private LegalHoldEvaluationState loadApplicableHolds(String sourceService, String recordType,
-                                                         String recordId, String categoryCode) {
-        try {
-            legalHoldEventWriter.lockEvaluationScope(sourceService, recordType, recordId, categoryCode);
-            return legalHoldRepository.findApplicable(sourceService, recordType, recordId, categoryCode);
-        } catch (DataAccessException | IllegalStateException exception) {
-            log.error("Legal hold state unavailable for retention evaluation sourceService={} recordType={}",
-                    sourceService, recordType, exception);
-            return LegalHoldEvaluationState.unavailable();
-        }
     }
 
     private SourceEvidenceEvaluationResult recordEvaluation(
@@ -196,11 +178,12 @@ public class RetentionPolicyEvaluationService {
             Long acknowledgedSourceRevision,
             Instant evaluationAt,
             Map<String, ExternalScheduleResult> externalScheduleResultsByRuleCode,
-            LegalHoldEvaluationState holdState,
+            List<HoldStatus> holdStatuses,
+            List<RecordsHoldEvaluationProvenance> holdEvidence,
             RetentionEvaluationEvidence evaluationInput,
             RetentionEvaluationResult evaluation) {
         return recordEvaluation(sourceService, recordType, recordId, receipt, acknowledgedSourceRevision,
-                evaluationAt, externalScheduleResultsByRuleCode, holdState,
+                evaluationAt, externalScheduleResultsByRuleCode, holdStatuses, holdEvidence,
                 evaluationInput, new EvaluationContext(evaluation, List.of(), List.of()));
     }
 
@@ -212,7 +195,8 @@ public class RetentionPolicyEvaluationService {
             Long acknowledgedSourceRevision,
             Instant evaluationAt,
             Map<String, ExternalScheduleResult> externalScheduleResultsByRuleCode,
-            LegalHoldEvaluationState holdState,
+            List<HoldStatus> holdStatuses,
+            List<RecordsHoldEvaluationProvenance> holdEvidence,
             RetentionEvaluationEvidence evaluationInput,
             EvaluationContext context) {
         RetentionEvaluationHistoryProvenance provenance = new RetentionEvaluationHistoryProvenance(
@@ -222,8 +206,7 @@ public class RetentionPolicyEvaluationService {
                 receipt == null ? null : receipt.evidenceSha256(),
                 receipt == null ? null : receipt.receivedAt(),
                 acknowledgedSourceRevision, evaluationAt,
-                externalScheduleResultsByRuleCode, holdState.available(), holdState.statuses(),
-                holdState.applicableHolds(), evaluationInput,
+                externalScheduleResultsByRuleCode, true, holdStatuses, holdEvidence, evaluationInput,
                 context.policyVersions().stream().map(RetentionPolicyEvaluationService::toProvenance).toList(),
                 context.rules(), context.result());
         UUID evaluationId = historyRepository.append(provenance, receipt);

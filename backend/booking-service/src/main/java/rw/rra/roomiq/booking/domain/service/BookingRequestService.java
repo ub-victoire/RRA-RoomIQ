@@ -143,6 +143,7 @@ public class BookingRequestService {
         BookingRequest bookingRequest = repository.findByIdForUpdate(id)
                 .orElseThrow(() -> new DomainException(HttpStatus.NOT_FOUND, "BOOKING_REQUEST_NOT_FOUND",
                         "Booking request was not found"));
+        repository.requireNoActiveLegalHold(id);
         authorizationClient.authorizeCurrentCaller(new BookingAuthorizationRequest(REQUEST_READ,
                 bookingRequest.getOfficeBuildingId(), null, bookingRequest.getRequestedByUserId(), null));
         if (bookingRequest.getStatus() != BookingRequestStatus.DRAFT) {
