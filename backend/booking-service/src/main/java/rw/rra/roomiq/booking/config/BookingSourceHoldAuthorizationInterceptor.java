@@ -35,9 +35,9 @@ import java.util.UUID;
 @Component
 public class BookingSourceHoldAuthorizationInterceptor implements HandlerInterceptor {
     public static final String AUTHENTICATED_SOURCE = "bookingAuthenticatedHoldSource";
-    private static final String SUBJECT = "records-lifecycle-service";
-    private static final String AUDIENCE = "rra-roomiq-booking-legal-hold";
-    private static final String PERMISSION = "BOOKING_SOURCE_HOLD_ENFORCE";
+    public static final String SUBJECT = "records-lifecycle-service";
+    public static final String AUDIENCE = "rra-roomiq-booking-legal-hold";
+    public static final String PERMISSION = "BOOKING_SOURCE_HOLD_ENFORCE";
     private static final Duration MAX_LIFETIME = Duration.ofMinutes(2);
 
     private final ResourceLoader resourceLoader;

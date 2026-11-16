@@ -46,5 +46,6 @@
         <module>audit-service</module>
         <module>records-lifecycle-service</module>
         <module>analytics-service</module>
+        <module>booking-rlc-contract-tests</module>
     </modules>
 </project>

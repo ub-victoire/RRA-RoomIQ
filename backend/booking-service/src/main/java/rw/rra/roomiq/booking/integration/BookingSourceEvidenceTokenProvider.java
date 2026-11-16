@@ -35,7 +35,9 @@ import java.util.UUID;
 
 @Component
 public class BookingSourceEvidenceTokenProvider {
-    private static final String SUBJECT = "booking-service";
+    public static final String SUBJECT = "booking-service";
+    public static final String AUDIENCE = "rra-roomiq-records-lifecycle-source-evidence";
+    public static final String PERMISSION = "BOOKING_SOURCE_EVIDENCE_PUBLISH";
     private static final Duration TOKEN_LIFETIME = Duration.ofMinutes(2);
 
     private final ResourceLoader resourceLoader;
@@ -77,11 +79,11 @@ public class BookingSourceEvidenceTokenProvider {
             JwtClaimsSet claims = JwtClaimsSet.builder()
                     .issuer(issuer)
                     .subject(SUBJECT)
-                    .audience(List.of(BookingSourceEvidenceJwtAudience.VALUE))
+                    .audience(List.of(AUDIENCE))
                     .issuedAt(now)
                     .expiresAt(now.plus(TOKEN_LIFETIME))
                     .id(UUID.randomUUID().toString())
-                    .claim("permissions", List.of(BookingSourceEvidencePermission.CODE))
+                    .claim("permissions", List.of(PERMISSION))
                     .build();
             String token = encoder.encode(JwtEncoderParameters.from(
                     JwsHeader.with(SignatureAlgorithm.RS256).keyId(keyId).build(), claims)).getTokenValue();
@@ -113,11 +115,4 @@ public class BookingSourceEvidenceTokenProvider {
         return crtKey;
     }
 
-    private static final class BookingSourceEvidenceJwtAudience {
-        private static final String VALUE = "rra-roomiq-records-lifecycle-source-evidence";
-    }
-
-    private static final class BookingSourceEvidencePermission {
-        private static final String CODE = "BOOKING_SOURCE_EVIDENCE_PUBLISH";
-    }
 }

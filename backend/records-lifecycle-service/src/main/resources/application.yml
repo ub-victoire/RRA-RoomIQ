@@ -69,7 +69,7 @@ roomiq:
         allowed-categories: ${RLC_BOOKING_SOURCE_EVIDENCE_ALLOWED_CATEGORIES:}
     booking-hold-instructions:
       enabled: ${RLC_BOOKING_HOLD_DELIVERY_ENABLED:true}
-      url: ${BOOKING_SERVICE_URL:}
+      url: ${RLC_BOOKING_HOLD_SERVICE_URL:${BOOKING_SERVICE_URL:}}
       connect-timeout: ${BOOKING_HOLD_CONNECT_TIMEOUT:2s}
       read-timeout: ${BOOKING_HOLD_READ_TIMEOUT:5s}
       delivery-interval: ${BOOKING_HOLD_DELIVERY_INTERVAL:PT10S}

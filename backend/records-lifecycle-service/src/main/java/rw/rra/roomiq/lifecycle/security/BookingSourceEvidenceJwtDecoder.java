@@ -30,7 +30,7 @@ import java.util.UUID;
 public class BookingSourceEvidenceJwtDecoder implements JwtDecoder {
     public static final String AUDIENCE = "rra-roomiq-records-lifecycle-source-evidence";
     public static final String PERMISSION = "BOOKING_SOURCE_EVIDENCE_PUBLISH";
-    private static final String SUBJECT = "booking-service";
+    public static final String SUBJECT = "booking-service";
     private static final Duration MAX_LIFETIME = Duration.ofMinutes(2);
 
     private final ResourceLoader resourceLoader;

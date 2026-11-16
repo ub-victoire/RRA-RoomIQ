@@ -1,0 +1,47 @@
+{
+  "evidence": {
+    "contractVersion": 1,
+    "sourceService": "booking-service",
+    "recordType": "BOOKING_REQUEST",
+    "recordId": "11111111-1111-4111-8111-111111111111",
+    "eventId": "22222222-2222-4222-8222-222222222222",
+    "eventType": "BOOKING_REQUEST_STATUS_CHANGED",
+    "eventVersion": 1,
+    "sourceRevision": 2,
+    "categoryCode": "TEST_BOOKING_CATEGORY",
+    "recordCreatedAt": "2026-01-01T10:00:00Z",
+    "occurredAt": "2026-01-02T10:00:00Z",
+    "authoritativeStartAt": "2026-01-01T10:00:00Z",
+    "startBasisCode": "RECORD_CREATED_AT",
+    "closedAt": null,
+    "decisionAt": "2026-01-02T10:00:00Z",
+    "transactionClosedAt": null,
+    "actorSubject": null,
+    "correlationId": "synthetic-correlation",
+    "causationId": null,
+    "supersedesEventId": "33333333-3333-4333-8333-333333333333",
+    "currentLifecycleStatus": "APPROVED",
+    "observedAt": "2026-01-02T10:01:00Z"
+  },
+  "instruction": {
+    "contractVersion": 1,
+    "instructionId": "44444444-4444-4444-8444-444444444444",
+    "holdId": "55555555-5555-4555-8555-555555555555",
+    "instructionRevision": 1,
+    "operation": "APPLY",
+    "sourceService": "booking-service",
+    "recordType": "BOOKING_REQUEST",
+    "recordId": "11111111-1111-4111-8111-111111111111",
+    "instructionReferenceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "issuedAt": "2026-01-02T10:00:00Z",
+    "correlationId": "synthetic-correlation"
+  },
+  "acknowledgement": {
+    "instructionId": "44444444-4444-4444-8444-444444444444",
+    "holdId": "55555555-5555-4555-8555-555555555555",
+    "instructionRevision": 1,
+    "outcome": "ACCEPTED",
+    "enforcementStatus": "ACTIVE",
+    "bookingRequestVersion": 4
+  }
+}
