@@ -74,6 +74,8 @@ class BookingSourceHoldAuthorizationInterceptorTests {
                 List.of(PERMISSION), Instant.now().plusSeconds(60)));
         assertRejected(token(trustedKey, ISSUER, List.of("another-audience"), SUBJECT,
                 List.of(PERMISSION), Instant.now().plusSeconds(60)));
+        assertRejected(token(trustedKey, ISSUER, List.of(), SUBJECT,
+                List.of(PERMISSION), Instant.now().plusSeconds(60)));
         assertRejected(token(trustedKey, ISSUER, List.of(AUDIENCE), SUBJECT,
                 List.of("UNRELATED_PERMISSION"), Instant.now().plusSeconds(60)));
         assertRejected(token(trustedKey, ISSUER, List.of(AUDIENCE), "booking-service",
@@ -111,7 +113,7 @@ class BookingSourceHoldAuthorizationInterceptorTests {
         return encoder.encode(JwtEncoderParameters.from(
                 JwsHeader.with(SignatureAlgorithm.RS256).keyId("trusted-key").build(),
                 JwtClaimsSet.builder().issuer(issuer).subject(subject).audience(audience)
-                        .issuedAt(now.minusSeconds(1)).expiresAt(expiresAt).id(UUID.randomUUID().toString())
+                        .issuedAt(now.minusSeconds(60)).expiresAt(expiresAt).id(UUID.randomUUID().toString())
                         .claim("permissions", permissions).build())).getTokenValue();
     }
 

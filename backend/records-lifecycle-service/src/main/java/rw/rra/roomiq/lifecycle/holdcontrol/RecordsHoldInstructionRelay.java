@@ -77,16 +77,16 @@ public class RecordsHoldInstructionRelay {
             logger.error("Could not claim due Booking legal-hold instructions", exception);
             return;
         }
-
-        @PostConstruct
-        void reportMissingSenderConfiguration() {
-            if (enabled && !tokenProvider.isConfigured()) {
-                logger.warn("Booking hold delivery is disabled until BOOKING_SERVICE_URL and RLC service-token "
-                        + "issuer, key ID, and private-key location are configured");
-            }
-        }
         for (RecordsHoldInstruction instruction : claimed) {
             deliver(instruction);
+        }
+    }
+
+    @PostConstruct
+    void reportMissingSenderConfiguration() {
+        if (enabled && !tokenProvider.isConfigured()) {
+            logger.warn("Booking hold delivery is disabled until BOOKING_SERVICE_URL and RLC service-token "
+                    + "issuer, key ID, and private-key location are configured");
         }
     }
 
@@ -100,7 +100,7 @@ public class RecordsHoldInstructionRelay {
                     .body(BookingHoldAcknowledgement.class);
             acknowledgements.accept(instruction, acknowledgement);
         } catch (HttpClientErrorException exception) {
-            outbox.acknowledge(instruction, null, clock.instant());
+            outbox.reconcile(instruction, null, "BOOKING_HTTP_" + exception.getStatusCode().value());
             logger.warn("Booking rejected hold instruction {} with status {}",
                     instruction.instruction().instructionId(), exception.getStatusCode());
         } catch (HttpServerErrorException | ResourceAccessException exception) {

@@ -57,9 +57,9 @@ public class RecordsHoldServiceTokenProvider {
             @Value("${roomiq.lifecycle.booking-hold-instructions.url:}") String bookingUrl,
             @Value("${roomiq.lifecycle.booking-hold-instructions.connect-timeout:2s}") Duration connectTimeout,
             @Value("${roomiq.lifecycle.booking-hold-instructions.read-timeout:5s}") Duration readTimeout,
-            @Value("${roomiq.lifecycle.booking-hold-instructions.issuer:}") String issuer,
-            @Value("${roomiq.lifecycle.booking-hold-instructions.key-id:}") String keyId,
-            @Value("${roomiq.lifecycle.booking-hold-instructions.private-key-location:}") String privateKeyLocation) {
+            @Value("${roomiq.auth.records-lifecycle-service-token.issuer:}") String issuer,
+            @Value("${roomiq.auth.records-lifecycle-service-token.key-id:}") String keyId,
+            @Value("${roomiq.auth.records-lifecycle-service-token.private-key-location:}") String privateKeyLocation) {
         this(resourceLoader, bookingUrl, connectTimeout, readTimeout, issuer, keyId, privateKeyLocation,
                 Clock.systemUTC());
     }
@@ -144,14 +144,14 @@ public class RecordsHoldServiceTokenProvider {
         try {
             URI uri = URI.create(value);
             if (!uri.isAbsolute()
-                    || !(uri.getScheme().equalsIgnoreCase("http") || uri.getScheme().equalsIgnoreCase("https"))
+                    || !uri.getScheme().equalsIgnoreCase("https")
                     || uri.getHost() == null || uri.getUserInfo() != null
                     || uri.getQuery() != null || uri.getFragment() != null) {
-                throw new IllegalStateException("BOOKING_SERVICE_URL must be an absolute HTTP(S) URL");
+                throw new IllegalStateException("BOOKING_SERVICE_URL must be an absolute HTTPS URL");
             }
             return uri;
         } catch (IllegalArgumentException exception) {
-            throw new IllegalStateException("BOOKING_SERVICE_URL must be a valid absolute HTTP(S) URL", exception);
+            throw new IllegalStateException("BOOKING_SERVICE_URL must be a valid absolute HTTPS URL", exception);
         }
     }
 }

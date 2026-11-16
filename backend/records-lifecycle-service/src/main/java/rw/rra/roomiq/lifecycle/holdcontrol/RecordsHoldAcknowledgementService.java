@@ -3,6 +3,7 @@ package rw.rra.roomiq.lifecycle.holdcontrol;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
+import rw.rra.roomiq.lifecycle.sourceevidence.SourceOwnerEvidenceRepository;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -15,36 +16,42 @@ public class RecordsHoldAcknowledgementService {
     private final RecordsHoldInstructionOutboxRepository outbox;
     private final RecordsHoldRepository holds;
     private final RecordsHoldEventWriter events;
+    private final SourceOwnerEvidenceRepository sourceEvidence;
     private final Clock clock;
 
     @Autowired
     public RecordsHoldAcknowledgementService(RecordsHoldInstructionOutboxRepository outbox,
                                              RecordsHoldRepository holds,
-                                             RecordsHoldEventWriter events) {
-        this(outbox, holds, events, Clock.systemUTC());
+                                             RecordsHoldEventWriter events,
+                                             SourceOwnerEvidenceRepository sourceEvidence) {
+        this(outbox, holds, events, sourceEvidence, Clock.systemUTC());
     }
 
     RecordsHoldAcknowledgementService(RecordsHoldInstructionOutboxRepository outbox,
                                       RecordsHoldRepository holds,
-                                      RecordsHoldEventWriter events, Clock clock) {
+                                      RecordsHoldEventWriter events,
+                                      SourceOwnerEvidenceRepository sourceEvidence, Clock clock) {
         this.outbox = outbox;
         this.holds = holds;
         this.events = events;
+        this.sourceEvidence = sourceEvidence;
         this.clock = clock;
     }
 
     @Transactional
     public void accept(RecordsHoldInstruction claimed, BookingHoldAcknowledgement acknowledgement) {
         RecordsHoldInstruction instruction = outbox.findForUpdate(claimed.outboxId());
-        if (!"PROCESSING".equals(instruction.deliveryStatus())) {
+        if (!"PROCESSING".equals(instruction.deliveryStatus())
+                || instruction.attemptCount() != claimed.attemptCount()) {
             return;
         }
         BookingHoldInstruction payload = instruction.instruction();
+        sourceEvidence.lockRecord(payload.sourceService(), payload.recordType(), payload.recordId());
         RecordsLegalHold hold = holds.findByIdForUpdate(payload.holdId()).orElse(null);
         if (hold == null || !expectedAcknowledgement(payload, acknowledgement)
                 || "RELEASE".equals(payload.operation())
                 && hold.status() != RecordsHoldStatus.RELEASE_ENFORCEMENT_PENDING) {
-            outbox.acknowledge(instruction, acknowledgement, clock.instant());
+            outbox.reconcile(instruction, acknowledgement, "ACKNOWLEDGEMENT_NOT_ACCEPTED");
             return;
         }
 
@@ -73,6 +80,8 @@ public class RecordsHoldAcknowledgementService {
                 || !instruction.instructionId().equals(acknowledgement.instructionId())
                 || !instruction.holdId().equals(acknowledgement.holdId())
                 || instruction.instructionRevision() != acknowledgement.instructionRevision()
+                || acknowledgement.bookingRequestVersion() == null
+                || acknowledgement.bookingRequestVersion() < 0
                 || !(acknowledgement.outcome() == BookingHoldAcknowledgement.Outcome.ACCEPTED
                     || acknowledgement.outcome() == BookingHoldAcknowledgement.Outcome.DUPLICATE)) {
             return false;

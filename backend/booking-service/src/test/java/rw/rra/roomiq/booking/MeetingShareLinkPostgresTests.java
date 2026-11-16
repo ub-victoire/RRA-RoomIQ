@@ -105,10 +105,11 @@ class MeetingShareLinkPostgresTests {
     @BeforeEach
     void setUp() {
         reset(authorization, ownerServices);
-        jdbcTemplate.execute("""
-                TRUNCATE TABLE meeting_share_link, meeting_participant, meeting, reservation_occurrence,
-                    booking_extension, cancellation, approval_decision, reservation, booking_request CASCADE
-                """);
+        for (String table : List.of("meeting_share_link", "meeting_participant", "meeting",
+                "reservation_occurrence", "booking_extension", "cancellation", "approval_decision",
+                "booking_source_evidence_outbox", "reservation", "booking_request")) {
+            jdbcTemplate.update("DELETE FROM " + table);
+        }
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("Authorization", TOKEN);
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));

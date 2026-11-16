@@ -170,7 +170,8 @@ public class RecordsHoldRegistryService {
         if (request == null || request.holdId() == null
                 || !BOOKING_SERVICE.equals(request.sourceService())
                 || !BOOKING_REQUEST.equals(request.recordType())
-                || request.recordId() == null || !request.recordId().matches("[A-Za-z0-9._:-]{1,128}")
+                || request.recordId() == null
+                || !request.recordId().matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
                 || !validReference(request.instructionReference())) {
             throw new DomainException(HttpStatus.BAD_REQUEST, "INVALID_LEGAL_HOLD",
                     "Legal hold must identify a supported Booking request and a bounded instruction reference");

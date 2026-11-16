@@ -235,7 +235,7 @@ class BookingServiceApplicationTests {
                 .extracting(entityType -> entityType.getJavaType().getSimpleName())
                 .containsExactlyInAnyOrder("BookingRequest", "ApprovalDecision", "Reservation", "Meeting",
                         "MeetingParticipant", "MeetingShareLink", "BookingExtension", "Cancellation",
-                        "ReservationOccurrence", "BookingEventOutboxEntry");
+                        "ReservationOccurrence", "BookingEventOutboxEntry", "BookingRecordLegalHold");
 
         Instant start = Instant.parse("2026-11-07T10:00:00Z");
         Instant end = Instant.parse("2026-11-07T11:00:00Z");

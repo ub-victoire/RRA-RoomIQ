@@ -24,6 +24,7 @@ import java.util.UUID;
 @Service
 public class BookingSourceHoldService {
     private static final String TRUSTED_SOURCE = "records-lifecycle-service";
+    private static final String RECORD_OWNER = "booking-service";
     private static final String RECORD_TYPE = "BOOKING_REQUEST";
     private final BookingRequestRepository bookingRequests;
     private final BookingRecordLegalHoldRepository holds;
@@ -155,7 +156,7 @@ public class BookingSourceHoldService {
                 || instruction.instructionId() == null || instruction.holdId() == null
                 || instruction.instructionRevision() < 1
                 || !TRUSTED_SOURCE.equals(authenticatedSource)
-                || !TRUSTED_SOURCE.equals(instruction.sourceService())
+                || !RECORD_OWNER.equals(instruction.sourceService())
                 || !RECORD_TYPE.equals(instruction.recordType())
                 || instruction.recordId() == null
                 || !instruction.recordId().matches("(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")

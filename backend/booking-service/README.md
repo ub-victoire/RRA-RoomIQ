@@ -37,6 +37,12 @@ Configure these values only after approved deployment/key provisioning:
 
 Focused source-evidence tests cover PostgreSQL outbox atomicity, configured/unmapped category behavior, revision supersession, RS256 claim validation and rotation, endpoint authorization/payload constraints, receipt persistence, stale-evidence fail-closed evaluation, and retry/acknowledgement state changes. The integration does not yet include other source services, production key distribution/rotation, externally monitored reconciliation, RRA validation, or live multi-service deployment evidence.
 
+## S8-06 WP5 Booking legal-hold enforcement
+
+Booking accepts RLC hold instructions only at the internal, non-Gateway-routed `POST /internal/v1/legal-holds/instructions`. It verifies RLC's pinned RS256 workload identity and dedicated audience/permission, then locks the identified `BOOKING_REQUEST` and records enforcement and a receipt atomically. Active local holds block the guarded request and reservation lifecycle and extension operations; ordered releases clear only their hold. Duplicate, stale, conflicting and out-of-order instructions are distinguished. Booking Flyway V9 creates the local hold and receipt tables; V10 adds deletion guards. The full contract, retry limits, trust model and outstanding operational prerequisites are in [the source-owner contract](../docs/source-owner-evidence-contract-v1.md).
+
+RLC's `PENDING_BLOCK` is not proof that Booking has received or enforced a hold. Production RRA validation, TLS/workload-key provisioning, monitoring and reconciliation, and coverage of other record owners and copies remain outstanding.
+
 ## S6-13 occupancy provider and event relay
 
 - `POST /api/v1/internal/availability/occupancy` accepts `roomIds`, a positive half-open `startsAt`/`endsAt` range, and `contractVersion: "v1"`. It is protected by the same Identity-backed bearer interceptor as every Booking `/api/v1/**` operation, is hidden from generated public OpenAPI, and has no API Gateway route.

@@ -68,36 +68,35 @@ public class RecordsHoldInstructionOutboxRepository {
 
     public void acknowledge(RecordsHoldInstruction instruction, BookingHoldAcknowledgement acknowledgement,
                             Instant now) {
-        String expectedState = "APPLY".equals(instruction.instruction().operation()) ? "ACTIVE" : "RELEASED";
-        boolean accepted = acknowledgement != null
-                && instruction.instruction().instructionId().equals(acknowledgement.instructionId())
-                && instruction.instruction().holdId().equals(acknowledgement.holdId())
-                && instruction.instruction().instructionRevision() == acknowledgement.instructionRevision()
-                && (acknowledgement.outcome() == BookingHoldAcknowledgement.Outcome.ACCEPTED
-                    || acknowledgement.outcome() == BookingHoldAcknowledgement.Outcome.DUPLICATE)
-                && expectedState.equals(acknowledgement.enforcementStatus());
-        if (accepted) {
-            jdbcTemplate.update("""
+        jdbcTemplate.update("""
                     UPDATE lifecycle_hold_instruction_outbox
                     SET delivery_status = 'ACKNOWLEDGED', last_acknowledgement_outcome = ?,
                         acknowledged_enforcement_status = ?, acknowledged_booking_request_version = ?,
                         acknowledged_at = ?, lease_expires_at = NULL
-                    WHERE outbox_id = ? AND delivery_status = 'PROCESSING'
+                    WHERE outbox_id = ? AND delivery_status = 'PROCESSING' AND attempt_count = ?
                     """, acknowledgement.outcome().name(), acknowledgement.enforcementStatus(),
-                    acknowledgement.bookingRequestVersion(), Timestamp.from(now), instruction.outboxId());
-        } else {
-            jdbcTemplate.update("""
+                    acknowledgement.bookingRequestVersion(), Timestamp.from(now), instruction.outboxId(),
+                instruction.attemptCount());
+    }
+
+    public void reconcile(RecordsHoldInstruction instruction, BookingHoldAcknowledgement acknowledgement,
+                          String errorCode) {
+        String outcome = acknowledgement == null || acknowledgement.outcome() == null
+                ? null : acknowledgement.outcome().name();
+        String state = acknowledgement == null ? null : acknowledgement.enforcementStatus();
+        if (!"ACTIVE".equals(state) && !"RELEASED".equals(state)) {
+            state = null;
+        }
+        jdbcTemplate.update("""
                     UPDATE lifecycle_hold_instruction_outbox
                     SET delivery_status = 'RECONCILIATION_REQUIRED',
                         last_acknowledgement_outcome = ?, acknowledged_enforcement_status = ?,
-                        acknowledged_booking_request_version = ?, last_error_code = 'ACKNOWLEDGEMENT_NOT_ACCEPTED',
+                        acknowledged_booking_request_version = ?, last_error_code = ?,
                         lease_expires_at = NULL
-                    WHERE outbox_id = ? AND delivery_status = 'PROCESSING'
-                    """, acknowledgement == null ? null : acknowledgement.outcome().name(),
-                    acknowledgement == null ? null : acknowledgement.enforcementStatus(),
+                    WHERE outbox_id = ? AND delivery_status = 'PROCESSING' AND attempt_count = ?
+                    """, outcome, state,
                     acknowledgement == null ? null : acknowledgement.bookingRequestVersion(),
-                    instruction.outboxId());
-        }
+                    boundedCode(errorCode), instruction.outboxId(), instruction.attemptCount());
     }
 
     public void retry(RecordsHoldInstruction instruction, Instant now, String errorCode, int maxAttempts) {
@@ -107,9 +106,10 @@ public class RecordsHoldInstructionOutboxRepository {
                 UPDATE lifecycle_hold_instruction_outbox
                 SET delivery_status = ?, next_attempt_at = ?, lease_expires_at = NULL,
                     last_error_code = ?
-                WHERE outbox_id = ? AND delivery_status = 'PROCESSING'
+                WHERE outbox_id = ? AND delivery_status = 'PROCESSING' AND attempt_count = ?
                 """, exhausted ? "RECONCILIATION_REQUIRED" : "PENDING",
-                Timestamp.from(now.plusSeconds(delaySeconds)), boundedCode(errorCode), instruction.outboxId());
+                Timestamp.from(now.plusSeconds(delaySeconds)), boundedCode(errorCode), instruction.outboxId(),
+                instruction.attemptCount());
     }
 
     private static String boundedCode(String value) {

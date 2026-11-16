@@ -79,10 +79,11 @@ public class BookingSourceHoldAuthorizationInterceptor implements HandlerInterce
             throw new DomainException(HttpStatus.UNAUTHORIZED, "SERVICE_TOKEN_INVALID",
                     "Trusted RLC service authentication is invalid");
         }
-        if (!SUBJECT.equals(jwt.getSubject()) || !jwt.getAudience().equals(List.of(AUDIENCE))
+        if (!SUBJECT.equals(jwt.getSubject()) || !List.of(AUDIENCE).equals(jwt.getAudience())
                 || jwt.getIssuedAt() == null || jwt.getExpiresAt() == null
                 || jwt.getIssuedAt().isAfter(Instant.now().plusSeconds(30))
                 || !jwt.getExpiresAt().isAfter(Instant.now())
+                || !jwt.getExpiresAt().isAfter(jwt.getIssuedAt())
                 || jwt.getExpiresAt().isAfter(jwt.getIssuedAt().plus(MAX_LIFETIME))
                 || !isUuid(jwt.getId()) || !hasPermission(jwt)) {
             throw new DomainException(HttpStatus.UNAUTHORIZED, "SERVICE_TOKEN_INVALID",

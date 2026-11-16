@@ -6,6 +6,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.web.context.WebApplicationContext;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -27,9 +29,14 @@ import rw.rra.roomiq.common.web.DomainException;
 
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
 @Testcontainers
@@ -64,6 +71,9 @@ class BookingSourceHoldPostgresTests {
     @Autowired
     private BookingSourceHoldAuthorizationInterceptor authorizationInterceptor;
 
+    @Autowired
+    private WebApplicationContext webApplicationContext;
+
     @Test
     void appliesAndReleasesOnlyOrderedAuthenticatedInstructionsIdempotently() {
         BookingRequest request = saveRequest();
@@ -84,6 +94,11 @@ class BookingSourceHoldPostgresTests {
         assertThatThrownBy(() -> jdbcTemplate.update("""
                 UPDATE booking_request SET status = 'CANCELLED' WHERE id = ?
                 """, request.getId())).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "DELETE FROM booking_request WHERE id = ?", request.getId()))
+                .isInstanceOf(RuntimeException.class);
+        assertThat(holds.receive(instruction(holdId, request.getId(), 1, "APPLY", UUID.randomUUID()),
+                "records-lifecycle-service").outcome()).isEqualTo(BookingHoldAcknowledgement.Outcome.CONFLICTED);
 
         assertThat(holds.receive(instruction(holdId, request.getId(), 3, "RELEASE", UUID.randomUUID()),
                 "records-lifecycle-service").outcome())
@@ -107,7 +122,44 @@ class BookingSourceHoldPostgresTests {
     }
 
     @Test
-    void holdInstructionAndReceiptRollBackTogetherAndInternalEndpointRequiresTrustedToken() {
+    void holdInstructionWaitsForConcurrentBookingTransaction() throws Exception {
+        BookingRequest request = saveRequest();
+        BookingHoldInstruction instruction = instruction(UUID.randomUUID(), request.getId(), 1, "APPLY",
+                UUID.randomUUID());
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch unlock = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var bookingUpdate = executor.submit(() -> new TransactionTemplate(transactionManager).execute(status -> {
+                requests.findByIdForUpdate(request.getId()).orElseThrow();
+                locked.countDown();
+                try {
+                    if (!unlock.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Timed out waiting to release booking lock");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(exception);
+                }
+                return null;
+            }));
+            assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+            var delivery = executor.submit(() -> holds.receive(instruction, "records-lifecycle-service"));
+            try {
+                assertThatThrownBy(() -> delivery.get(200, TimeUnit.MILLISECONDS))
+                        .isInstanceOf(java.util.concurrent.TimeoutException.class);
+            } finally {
+                unlock.countDown();
+            }
+            bookingUpdate.get(10, TimeUnit.SECONDS);
+            assertThat(delivery.get(10, TimeUnit.SECONDS).outcome())
+                    .isEqualTo(BookingHoldAcknowledgement.Outcome.ACCEPTED);
+        } finally {
+            unlock.countDown();
+        }
+    }
+
+    @Test
+    void holdInstructionAndReceiptRollBackTogetherAndInternalEndpointRequiresTrustedToken() throws Exception {
         BookingRequest request = saveRequest();
         UUID holdId = UUID.randomUUID();
         BookingHoldInstruction instruction = instruction(holdId, request.getId(), 1, "APPLY", UUID.randomUUID());
@@ -125,6 +177,10 @@ class BookingSourceHoldPostgresTests {
         assertThatThrownBy(() -> authorizationInterceptor.preHandle(
                 httpRequest, new MockHttpServletResponse(), new Object()))
                 .isInstanceOf(DomainException.class);
+        MockMvcBuilders.webAppContextSetup(webApplicationContext).build()
+                .perform(post("/internal/v1/legal-holds/instructions")
+                        .contentType("application/json").content("{}"))
+                .andExpect(status().isUnauthorized());
         httpRequest.addHeader("Authorization", "Bearer invalid.token.value");
         assertThatThrownBy(() -> authorizationInterceptor.preHandle(
                 httpRequest, new MockHttpServletResponse(), new Object()))
@@ -143,7 +199,7 @@ class BookingSourceHoldPostgresTests {
     private static BookingHoldInstruction instruction(
             UUID holdId, UUID recordId, long revision, String operation, UUID instructionId) {
         return new BookingHoldInstruction(1, instructionId, holdId, revision, operation,
-                "records-lifecycle-service", "BOOKING_REQUEST", recordId.toString(),
+                "booking-service", "BOOKING_REQUEST", recordId.toString(),
                 "a".repeat(64), Instant.now(), "test-correlation");
     }
 }

@@ -405,6 +405,15 @@ class SourceOwnerEvidencePostgresTests {
     }
 
     @Test
+    void holdCreationRejectsNoncanonicalBookingRecordIdentifiers() {
+        assertThatThrownBy(() -> recordsHoldRegistryService.create(
+                new CreateRecordsHoldRequest(UUID.randomUUID(), "booking-service", "BOOKING_REQUEST",
+                        "not-a-booking-uuid", "TEST_INSTRUCTION"),
+                UUID.randomUUID(), "invalid-record-id", "correlation"))
+                .isInstanceOf(DomainException.class);
+    }
+
+    @Test
     void persistedOverlappingHoldsBlockEvaluationUntilEachReleaseIsIndependentlyVerified() throws Exception {
         UUID policyActor = UUID.randomUUID();
         UUID policyId = UUID.randomUUID();
@@ -508,6 +517,7 @@ class SourceOwnerEvidencePostgresTests {
         assertThat(apply).hasSize(1);
         var applyInstruction = apply.getFirst();
         assertThat(applyInstruction.instruction().operation()).isEqualTo("APPLY");
+        assertThat(applyInstruction.instruction().sourceService()).isEqualTo("booking-service");
         assertThat(applyInstruction.attemptCount()).isEqualTo(1);
         holdAcknowledgements.accept(applyInstruction, acknowledgement(applyInstruction, "ACTIVE"));
 
@@ -532,6 +542,41 @@ class SourceOwnerEvidencePostgresTests {
                 WHERE instruction_id = ?
                 """, String.class, release.getFirst().instruction().instructionId()))
                 .isEqualTo("ACKNOWLEDGED");
+    }
+
+    @Test
+    void retriesExpiredClaimsAndRejectsLateOrMismatchedAcknowledgements() {
+        UUID actorId = UUID.randomUUID();
+        UUID holdId = UUID.randomUUID();
+        recordsHoldRegistryService.create(new CreateRecordsHoldRequest(
+                holdId, "booking-service", "BOOKING_REQUEST", UUID.randomUUID().toString(),
+                "TEST_INSTRUCTION-RETRY"), actorId, "hold-retry-create", "hold-retry-correlation");
+        Instant now = Instant.now().plusSeconds(1);
+        var first = holdInstructionOutbox.claimDue(now, now.plusSeconds(5), 100).stream()
+                .filter(row -> row.instruction().holdId().equals(holdId)).findFirst().orElseThrow();
+        recordsHoldRegistryService.requestRelease(holdId, new ReleaseRecordsHoldRequest("TEST_RELEASE-RETRY"),
+                actorId, "hold-retry-release", "hold-retry-correlation");
+        recordsHoldRegistryService.verifyRelease(holdId,
+                new VerifyRecordsHoldReleaseRequest("TEST_VERIFY-RETRY"), UUID.randomUUID(),
+                "hold-retry-verify", "hold-retry-correlation");
+        assertThat(holdInstructionOutbox.claimDue(now.plusSeconds(1), now.plusSeconds(6), 100).stream()
+                .noneMatch(row -> row.instruction().holdId().equals(holdId))).isTrue();
+        holdInstructionOutbox.retry(first, now, "BOOKING_UNAVAILABLE", 3);
+        var second = holdInstructionOutbox.claimDue(now.plusSeconds(6), now.plusSeconds(20), 100).stream()
+                .filter(row -> row.instruction().holdId().equals(holdId)).findFirst().orElseThrow();
+        assertThat(second.attemptCount()).isEqualTo(2);
+        holdAcknowledgements.accept(first, acknowledgement(first, "ACTIVE"));
+        assertThat(holdInstructionOutbox.findForUpdate(first.outboxId()).deliveryStatus()).isEqualTo("PROCESSING");
+        holdAcknowledgements.accept(second, acknowledgement(second, "ACTIVE"));
+        var release = holdInstructionOutbox.claimDue(now.plusSeconds(7), now.plusSeconds(21), 100).stream()
+                .filter(row -> row.instruction().holdId().equals(holdId)).findFirst().orElseThrow();
+        holdAcknowledgements.accept(release, new BookingHoldAcknowledgement(
+                release.instruction().instructionId(), holdId, release.instruction().instructionRevision(),
+                BookingHoldAcknowledgement.Outcome.CONFLICTED, "ACTIVE", 1L));
+        assertThat(holdInstructionOutbox.findForUpdate(release.outboxId()).deliveryStatus())
+                .isEqualTo("RECONCILIATION_REQUIRED");
+        assertThat(recordsHoldRegistryService.get(holdId).status())
+                .isEqualTo(RecordsHoldStatus.RELEASE_ENFORCEMENT_PENDING);
     }
 
     private void acknowledgeDueHoldInstructions() {

@@ -55,6 +55,8 @@ Create permission rows through the Super Admin API after bootstrap. These stable
 
 `BOOKING_SOURCE_EVIDENCE_PUBLISH` is cataloged by Flyway V7 and is not granted to a user role. In the provisional S8-06 Booking-to-RLC integration, Booking signs a short-lived RS256 workload token locally and RLC validates its pinned key, issuer, exact audience, `booking-service` subject, expiry, and signed permission claim. Identity does not issue this workload token or make a runtime authorization decision for the delivery; production workload-key provisioning and RRA review remain outstanding.
 
+`BOOKING_SOURCE_HOLD_ENFORCE` is cataloged by Flyway V10 and is not automatically granted to a user role. For the reverse RLC-to-Booking hold boundary, RLC signs its own short-lived RS256 workload token; Booking validates a pinned RLC key, issuer, exact audience, subject, time claims and signed permission. Identity does not issue this token or dynamically evaluate its permission. Production workload-key and HTTPS identity provisioning and RRA review remain outstanding.
+
 ## Role policy
 
 - **Super Admin:** assign the unscoped `IDENTITY_SYSTEM_ADMIN` permission to the controlled `SUPER_ADMIN` role. This grants system-wide administration.
