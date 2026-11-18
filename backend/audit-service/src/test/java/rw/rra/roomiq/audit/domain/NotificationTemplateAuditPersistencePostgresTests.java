@@ -72,6 +72,10 @@ class NotificationTemplateAuditPersistencePostgresTests {
         assertThat(saved.getOutcome()).isEqualTo("SUCCESS");
         assertThat(saved.getCorrelationId()).isEqualTo("correlation-1");
         assertThat(saved.getOccurredAt()).isEqualTo(Instant.parse("2026-11-01T10:00:00.123456Z"));
+        assertThat(saved.getIngestedAt()).isNotNull();
+        var firstIngestedAt = saved.getIngestedAt();
+        processor.process(event);
+        assertThat(repository.findById(event.eventId()).orElseThrow().getIngestedAt()).isEqualTo(firstIngestedAt);
         assertThat(saved.getMetadata())
                 .contains("\"sourceService\": \"notification-service\"")
                 .contains("\"schemaVersion\": 1")

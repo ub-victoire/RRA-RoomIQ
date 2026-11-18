@@ -5,24 +5,31 @@ import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.Instant;
 import java.util.Objects;
 
 @Service
 public class IdentityAuditEventProcessor {
     private final AuditEventRepository repository;
     private final ObjectMapper objectMapper;
+    private final AuditSourceEvidenceOutboxService sourceEvidenceOutbox;
 
-    public IdentityAuditEventProcessor(AuditEventRepository repository, ObjectMapper objectMapper) {
+    public IdentityAuditEventProcessor(AuditEventRepository repository, ObjectMapper objectMapper,
+                                       AuditSourceEvidenceOutboxService sourceEvidenceOutbox) {
         this.repository = repository;
         this.objectMapper = objectMapper;
+        this.sourceEvidenceOutbox = sourceEvidenceOutbox;
     }
 
     @Transactional
     public void process(IdentityAuditEvent event) {
         int inserted = repository.insertIfAbsent(event.eventId(), event.actorUserId(), event.eventType(),
                 event.resourceType(), event.resourceId(), event.scopeOfficeBuildingId(), event.outcome(),
-                event.correlationId(), event.metadata(), event.timestamp());
+                event.correlationId(), event.metadata(), event.timestamp(), Instant.now());
         if (inserted > 0) {
+            AuditEvent persisted = repository.findById(event.eventId())
+                    .orElseThrow(() -> new IllegalStateException("Audit event disappeared after insertion"));
+            sourceEvidenceOutbox.record(persisted);
             return;
         }
         AuditEvent existing = repository.findById(event.eventId())

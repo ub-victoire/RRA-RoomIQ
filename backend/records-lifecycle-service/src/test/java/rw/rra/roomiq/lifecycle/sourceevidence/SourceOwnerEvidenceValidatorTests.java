@@ -109,6 +109,45 @@ class SourceOwnerEvidenceValidatorTests {
     }
 
     @Test
+    void acceptsAuditEvidenceOnlyForExplicitActionCategoryAndStartMapping() {
+        UUID eventId = UUID.randomUUID();
+        Instant occurredAt = Instant.parse("2024-01-02T00:00:00Z");
+        SourceOwnerEvidence auditEvidence = new SourceOwnerEvidence(1, "audit-service", "AUDIT_EVENT",
+                eventId.toString(), eventId, "AuthenticationFailed", 1, 1, "TEST_AUDIT_CATEGORY",
+                occurredAt.plusSeconds(1), occurredAt, occurredAt, "OCCURRED_AT", null, null, null,
+                null, "audit-correlation", null, null, "RECORDED", Instant.now());
+        SourceOwnerEvidenceValidator configuredValidator = new SourceOwnerEvidenceValidator("",
+                "AuthenticationFailed=TEST_AUDIT_CATEGORY:OCCURRED_AT");
+
+        assertThat(configuredValidator.validate(auditEvidence, "audit-service")).isEqualTo(auditEvidence);
+    }
+
+    @Test
+    void rejectsAuditEvidenceWithoutExactConfiguredMappingOrWithMutableRevision() {
+        UUID eventId = UUID.randomUUID();
+        Instant occurredAt = Instant.parse("2024-01-02T00:00:00Z");
+        SourceOwnerEvidence evidence = new SourceOwnerEvidence(1, "audit-service", "AUDIT_EVENT",
+                eventId.toString(), eventId, "AuthenticationFailed", 1, 1, "TEST_AUDIT_CATEGORY",
+                occurredAt.plusSeconds(1), occurredAt, occurredAt, "OCCURRED_AT", null, null, null,
+                null, null, null, null, "RECORDED", Instant.now());
+        SourceOwnerEvidenceValidator configuredValidator = new SourceOwnerEvidenceValidator("",
+                "AuthenticationFailed=OTHER_CATEGORY:OCCURRED_AT");
+
+        assertThatThrownBy(() -> configuredValidator.validate(evidence, "audit-service"))
+                .isInstanceOf(SourceOwnerEvidenceValidationException.class)
+                .hasMessageContaining("mapping is not configured");
+        SourceOwnerEvidence mutableRevision = new SourceOwnerEvidence(1, "audit-service", "AUDIT_EVENT",
+                eventId.toString(), eventId, "AuthenticationFailed", 1, 2, "TEST_AUDIT_CATEGORY",
+                occurredAt.plusSeconds(1), occurredAt, occurredAt, "OCCURRED_AT", null, null, null,
+                null, null, null, null, "RECORDED", Instant.now());
+        assertThatThrownBy(() -> new SourceOwnerEvidenceValidator("",
+                "AuthenticationFailed=TEST_AUDIT_CATEGORY:OCCURRED_AT")
+                .validate(mutableRevision, "audit-service"))
+                .isInstanceOf(SourceOwnerEvidenceValidationException.class)
+                .hasMessageContaining("source revision must equal 1");
+    }
+
+    @Test
     void requiresClosureTimestampForLaterDecisionClosureStart() {
         SourceOwnerEvidence evidence = withStartBasis(validEvidence(), "LATER_DECISION_CLOSURE");
 

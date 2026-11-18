@@ -71,6 +71,8 @@ class SourceOwnerEvidencePostgresTests {
         registry.add("roomiq.identity.url", () -> "http://localhost:8081");
         registry.add("roomiq.lifecycle.source-evidence.booking-requests.allowed-categories",
                 () -> "TEST_BOOKING_CATEGORY,TEST_BOOKING_START_BASIS_MISMATCH,TEST_BOOKING_HOLD_CATEGORY");
+        registry.add("roomiq.lifecycle.source-evidence.audit-events.allowed-mappings",
+                () -> "AUTHENTICATION_FAILED=TEST_AUDIT_CATEGORY:OCCURRED_AT");
         registry.add("roomiq.lifecycle.booking-hold-instructions.enabled", () -> "false");
     }
 
@@ -308,6 +310,74 @@ class SourceOwnerEvidencePostgresTests {
 
         assertThat(evidenceRepository.findLatestAccepted(
                 "booking-service", "BOOKING_REQUEST", recordId.toString())).isPresent();
+    }
+
+    @Test
+    void auditEvidenceEndpointRequiresItsDedicatedPermissionAndPersistsMinimizedEvidence() throws Exception {
+        UUID eventId = UUID.randomUUID();
+        Instant occurredAt = Instant.now().truncatedTo(ChronoUnit.SECONDS).plus(3, ChronoUnit.DAYS);
+        Instant recordCreatedAt = occurredAt.plusSeconds(1);
+        createAndActivatePolicy(UUID.randomUUID(), UUID.randomUUID(), occurredAt,
+                "TEST_AUDIT_CATEGORY", "OCCURRED_AT");
+        String requestBody = """
+                {
+                  "contractVersion": 1,
+                  "sourceService": "audit-service",
+                  "recordType": "AUDIT_EVENT",
+                  "recordId": "%s",
+                  "eventId": "%s",
+                  "eventType": "AUTHENTICATION_FAILED",
+                  "eventVersion": 1,
+                  "sourceRevision": 1,
+                  "categoryCode": "TEST_AUDIT_CATEGORY",
+                  "recordCreatedAt": "%s",
+                  "occurredAt": "%s",
+                  "authoritativeStartAt": "%s",
+                  "startBasisCode": "OCCURRED_AT",
+                  "correlationId": "audit-correlation-1",
+                  "currentLifecycleStatus": "RECORDED",
+                  "observedAt": "%s"
+                }
+                """.formatted(eventId, eventId, recordCreatedAt, occurredAt, occurredAt, occurredAt.plusSeconds(2));
+
+        mockMvc.perform(post("/internal/v1/source-evidence/audit-events")
+                        .contentType(MediaType.APPLICATION_JSON).content(requestBody))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/internal/v1/source-evidence/audit-events")
+                        .with(jwt().jwt(token -> token.subject("audit-service"))
+                                .authorities(new SimpleGrantedAuthority("SCOPE_BOOKING_SOURCE_EVIDENCE_PUBLISH")))
+                        .contentType(MediaType.APPLICATION_JSON).content(requestBody))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/internal/v1/source-evidence/audit-events")
+                        .with(jwt().jwt(token -> token.subject("audit-service"))
+                                .authorities(new SimpleGrantedAuthority("SCOPE_AUDIT_SOURCE_EVIDENCE_PUBLISH")))
+                        .contentType(MediaType.APPLICATION_JSON).content(requestBody))
+                .andExpect(status().isCreated());
+
+        assertThat(evidenceRepository.findLatestAccepted(
+                "audit-service", "AUDIT_EVENT", eventId.toString())).isPresent();
+        var evaluated = evaluationService.evaluateLatestEvidence("audit-service", "AUDIT_EVENT",
+                eventId.toString(), Instant.parse("2040-01-01T00:00:00Z"), 1L, Map.of());
+        assertThat(evaluated.sourceEvidenceEventId()).isEqualTo(eventId);
+        assertThat(evaluated.sourceRevision()).isEqualTo(1);
+        assertThat(evaluated.categoryCode()).isEqualTo("TEST_AUDIT_CATEGORY");
+        assertThat(evaluated.evaluation().eligible()).isFalse();
+        assertThat(evaluated.evaluation().reason())
+                .isEqualTo(RetentionEvaluationResult.Reason.HOLD_STATE_UNAVAILABLE);
+    }
+
+    @Test
+    void auditEvidenceRouteRejectsNonJsonAndUnmappedEvidence() throws Exception {
+        mockMvc.perform(post("/internal/v1/source-evidence/audit-events")
+                        .contentType(MediaType.TEXT_PLAIN).content("{}"))
+                .andExpect(status().isUnsupportedMediaType());
+
+        UUID eventId = UUID.randomUUID();
+        SourceOwnerEvidence unmapped = auditEvidence(eventId, "AUTHENTICATION_FAILED",
+                "UNMAPPED_AUDIT_CATEGORY", "OCCURRED_AT");
+        assertThatThrownBy(() -> ingestionService.ingest("audit-service", unmapped))
+                .isInstanceOf(SourceOwnerEvidenceValidationException.class)
+                .hasMessageContaining("mapping is not configured");
     }
 
     @Test
@@ -776,6 +846,17 @@ class SourceOwnerEvidencePostgresTests {
                 Instant.parse("2024-01-01T00:00:00Z"), occurredAt, occurredAt, "ORIGINAL_EVENT",
                 null, null, null, null, "correlation-1", null, supersedesEventId,
                 "booking-service".equals(sourceService) ? "PENDING_APPROVAL" : null, occurredAt);
+    }
+
+    private static SourceOwnerEvidence auditEvidence(UUID eventId, String eventType,
+                                                     String categoryCode, String startBasisCode) {
+        Instant occurredAt = Instant.parse("2024-01-02T00:00:00Z");
+        Instant recordCreatedAt = Instant.parse("2024-01-02T00:00:01Z");
+        Instant startAt = "RECORD_CREATED_AT".equals(startBasisCode) ? recordCreatedAt : occurredAt;
+        return new SourceOwnerEvidence(1, "audit-service", "AUDIT_EVENT", eventId.toString(), eventId,
+                eventType, 1, 1, categoryCode, recordCreatedAt, occurredAt, startAt, startBasisCode,
+                null, null, null, null, "audit-correlation-1", null, null, "RECORDED",
+                Instant.now());
     }
 
     private static SourceOwnerEvidence bookingEvidence(String recordId, Instant start) {

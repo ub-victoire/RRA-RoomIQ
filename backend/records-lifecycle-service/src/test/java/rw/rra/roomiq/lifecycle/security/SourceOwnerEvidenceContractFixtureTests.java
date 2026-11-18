@@ -22,6 +22,11 @@ class SourceOwnerEvidenceContractFixtureTests {
             assertRoundTrip(mapper, fixture.get("instruction"), BookingHoldInstruction.class);
             assertRoundTrip(mapper, fixture.get("acknowledgement"), BookingHoldAcknowledgement.class);
         }
+        try (InputStream input = getClass().getResourceAsStream("/contract-fixtures/audit-rlc-v1.json")) {
+            assertThat(input).isNotNull();
+            JsonNode fixture = mapper.readTree(input);
+            assertRoundTrip(mapper, fixture.get("evidence"), SourceOwnerEvidence.class);
+        }
     }
 
     private static <T> void assertRoundTrip(JsonMapper mapper, JsonNode expected, Class<T> type) throws Exception {

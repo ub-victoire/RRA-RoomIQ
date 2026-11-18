@@ -1,10 +1,10 @@
-# RLC Source-Owner Evidence Contract v1 — Booking Integration and Evaluation Controls
+# RLC Source-Owner Evidence Contract v1 — Booking and Audit Integrations
 
 ## Status and scope
 
-This note documents the implemented technical contract and Booking-to-RLC integration for S8-06 Work Package 2, the WP3 evaluator path, and the WP4/WP5 hold-control boundaries. The integration follows the provisional project baseline and is **pending RRA review — not yet validated**. It is not formal RRA approval, legal validation, records-management approval, production identity approval, or policy activation.
+This note documents the implemented technical contracts for Booking and Audit evidence ingestion, the WP3 evaluator path, and the WP4/WP5 hold-control boundaries. These implementations follow the provisional project baseline and are **pending RRA review — not yet validated**. They are not formal RRA approval, legal validation, records-management approval, production identity approval, or policy activation.
 
-Booking is the authoritative owner for `booking_request` records and this first integration covers only that aggregate. It does not cover reservations, meetings, participants, extensions, or other Booking records. Booking sends evidence to RLC over a service-authenticated internal HTTP endpoint. Neither service accesses the other's database.
+Booking remains the authoritative owner for `booking_request` records; that first integration does not cover reservations, meetings, participants, extensions, or other Booking records. Audit Service is the owner of the persisted `audit_event` records it accepts from its existing Identity and Notification consumers; the supplemental Audit feed covers only those Audit-owned rows, not their originating Identity/Notification records. Both send evidence to RLC over separate service-authenticated internal HTTP endpoints. Neither service accesses the other's database.
 
 ## Internal v1 evidence fields
 
@@ -13,18 +13,18 @@ The Java record is `SourceOwnerEvidence`. Its implemented fields are:
 | Field | Type | Requirement and meaning |
 |---|---|---|
 | `contractVersion` | integer | Must equal `1`; unknown versions are rejected. |
-| `sourceService` | string | Must be `booking-service` and equal the subject authenticated by the RLC RS256 resource-server boundary. |
-| `recordType` | string | `BOOKING_REQUEST` for this integration. |
-| `recordId` | string | Stable UUID string from Booking's `booking_request.id`. |
+| `sourceService` | string | Must match the source-service identity authenticated by the corresponding RLC RS256 resource-server boundary (`booking-service` or `audit-service`). |
+| `recordType` | string | `BOOKING_REQUEST` for Booking; `AUDIT_EVENT` for Audit. |
+| `recordId` | string | Stable UUID string from the owner row. Audit uses the `audit_event.id` UUID. |
 | `eventId` | UUID | Stable event identity used for duplicate and event-reuse detection. |
-| `eventType` | string | Uppercase owner event code. |
+| `eventType` | string | Booking's uppercase owner event code; Audit's exact persisted action string (case-sensitive, explicitly mapped). |
 | `eventVersion` | positive integer | Source event schema/version. |
-| `sourceRevision` | positive integer | Monotonic per-record revision used to order source changes. The owner must define and guarantee this property before integration. |
-| `categoryCode` | string | Uppercase configured category code. Booking's request-type mapping and RLC's independent allow-list must both explicitly include the value; both default to empty/unconfigured. |
-| `recordCreatedAt` | timestamp | Required source record creation time. |
+| `sourceRevision` | positive integer | Booking uses its per-record source revision. Audit rows are immutable, so the feed uses revision `1`; the owner must guarantee the source revision semantics. |
+| `categoryCode` | string | Uppercase configured category code. Booking's request-type mapping and RLC's independent allow-list must both explicitly include the value; Audit's action mapping and RLC's independent action/category/start-basis mapping must match exactly. All mappings default to empty/unconfigured. |
+| `recordCreatedAt` | timestamp | Required source record creation time. Booking uses its entity creation time; Audit uses the Audit-owned first-ingestion time `audit_event.ingested_at`. Historical Audit rows with unknown ingestion time are not backfilled. |
 | `occurredAt` | timestamp | Required source event occurrence time. |
 | `authoritativeStartAt` | timestamp | Required start instant selected by the source under the declared `startBasisCode`. |
-| `startBasisCode` | string | Required uppercase start-basis code. Implemented consistency checks cover record creation, occurrence/original-event, closure, and later-of-decision/transaction-closure. |
+| `startBasisCode` | string | Required uppercase start-basis code. Booking supports its documented lifecycle bases; Audit is limited to explicitly configured `OCCURRED_AT`, `ORIGINAL_EVENT`, or `RECORD_CREATED_AT`. |
 | `closedAt` | timestamp or null | Source closure time where applicable; cannot precede creation. |
 | `decisionAt` | timestamp or null | Source decision time for the later-of-decision/closure basis. |
 | `transactionClosedAt` | timestamp or null | Source transaction-closure time for the later-of-decision/closure basis. |
@@ -32,16 +32,17 @@ The Java record is `SourceOwnerEvidence`. Its implemented fields are:
 | `correlationId` | string or null | Optional correlation reference, limited to 128 characters. |
 | `causationId` | string or null | Optional causation reference, limited to 128 characters. |
 | `supersedesEventId` | UUID or null | Prior event identity for a correction/superseding revision. |
-| `currentLifecycleStatus` | string | Required Booking status: `DRAFT`, `PENDING_APPROVAL`, `APPROVED`, `REJECTED`, `CANCELLED`, or `EXPIRED`. |
+| `currentLifecycleStatus` | string | Booking status: `DRAFT`, `PENDING_APPROVAL`, `APPROVED`, `REJECTED`, `CANCELLED`, or `EXPIRED`; Audit uses the immutable status `RECORDED`. |
 | `observedAt` | timestamp | Required source observation time. RLC also independently records trusted server-side `receivedAt`. |
 
-The RLC endpoint is `POST /internal/v1/source-evidence/booking-requests`. RLC adds trusted server-side `receivedAt` and a SHA-256 digest of the serialized evidence to each append-only receipt. Receipt outcomes are `ACCEPTED`, `DUPLICATE`, `STALE`, and `CONFLICTED`; rejected outcomes are retained with a reason code. Invalid contract payloads fail validation before insertion. The receipt stores no source payload beyond the listed fields.
+The RLC endpoints are `POST /internal/v1/source-evidence/booking-requests` and `POST /internal/v1/source-evidence/audit-events`. RLC adds trusted server-side `receivedAt` and a SHA-256 digest of the serialized evidence to each append-only receipt. Receipt outcomes are `ACCEPTED`, `DUPLICATE`, `STALE`, and `CONFLICTED`; rejected outcomes are retained with a reason code. Invalid contract payloads fail validation before insertion. The receipt stores no source payload beyond the listed fields.
 
 This is the current internal JSON v1 shape, not a public Gateway API or broker event schema. The one-category shape and required positive revision are the v1 semantics for this bounded Booking integration. Other source owners require separately validated field mappings and source revision semantics; no compatibility or coverage is implied.
 
 ## Validation and persistence behavior
 
 - Unsupported versions, missing required values, malformed codes, invalid authenticated-source match, unconfigured Booking categories, invalid Booking record types/statuses, nonpositive versions/revisions, inconsistent start-basis timestamps, and impossible closure/decision ordering are rejected.
+- Audit evidence is accepted only when record type, UUID identity, immutable revision/version, status, and exact action/category/start-basis mapping match; unsupported lifecycle/personal provenance fields are rejected. The RLC Audit mapping allow-list is independent of the Audit sender mapping.
 - Exact redelivery of an accepted `(source, event, record, evidence digest)` is recorded as `DUPLICATE`; it does not replace the accepted evidence.
 - A lower source revision is recorded as `STALE` and is never selected by the evaluator.
 - Reuse of an event ID with different evidence, same-revision divergence, or a revision that does not supersede the latest accepted event is recorded as `CONFLICTED`.
@@ -52,13 +53,27 @@ This is the current internal JSON v1 shape, not a public Gateway API or broker e
 
 ## Security and integration boundary
 
-RLC validates the Booking bearer token using RS256, a pinned issuer, current/previous configured key IDs and public keys, exact audience `rra-roomiq-records-lifecycle-source-evidence`, subject `booking-service`, token UUID, issued-at/expiry, maximum two-minute lifetime, and the signed `BOOKING_SOURCE_EVIDENCE_PUBLISH` permission. A request-body filter accepts JSON only and caps the body at 64 KiB. No Gateway route is added.
+RLC validates the Booking bearer token using RS256, a pinned issuer, current/previous configured key IDs and public keys, exact audience `rra-roomiq-records-lifecycle-source-evidence`, subject `booking-service`, token UUID, issued-at/expiry, maximum two-minute lifetime, and the signed `BOOKING_SOURCE_EVIDENCE_PUBLISH` permission. The separate Audit token boundary and its dedicated claims are described in the supplemental section below. Both internal request-body filters accept JSON only and cap the body at 64 KiB. No Gateway route is added.
 
 Booking signs its short-lived service token locally using its configured private key, following the existing project service-token pattern. The dedicated permission is registered in the Identity permission catalog, but Identity does not issue this token or dynamically evaluate the permission during delivery. Production key provisioning, rotation procedures and RRA approval of this identity remain deployment/assurance boundaries.
 
 Booking persists a minimized snapshot and delivery state in its own `booking_source_evidence_outbox` in the same transaction as the booking request change. The existing business-event outbox contract is unchanged. The evidence payload omits title, purpose, participant details, room/department IDs, and other booking contents. RLC receipt persistence is RLC-local and append-only. It is not an Audit Service event and does not replace approved Audit feeds. No direct cross-service database access or physical cross-service foreign key is used.
 
-Booking source revision is the JPA `@Version` value plus one: initial persisted version 0 becomes source revision 1. Each newer snapshot references the previous event ID through `supersedesEventId`. The relay serializes revisions per request; only a matching RLC `ACCEPTED` or `DUPLICATE` acknowledgement marks delivery. Transient errors use capped exponential retry; after ten automatic attempts, or immediately for permanent 4xx/invalid acknowledgement, the row enters reconciliation-required state. An earlier undelivered revision blocks later revisions. Operational monitoring and manual reconciliation are not yet provisioned.
+Booking source revision is the JPA `@Version` value plus one: initial persisted version 0 becomes source revision 1. Each newer snapshot references the previous event ID through `supersedesEventId`. The relay serializes revisions per request; only a matching RLC `ACCEPTED` or `DUPLICATE` acknowledgement marks delivery. Transient errors use capped exponential retry; after ten automatic attempts, or immediately for permanent 4xx/invalid acknowledgement, the row enters reconciliation-required state. An earlier undelivered revision blocks later revisions. Audit rows are append-only and use event ID as record ID and revision 1; exact redelivery is idempotent and there is no correction/supersession path. Audit's outbox is written in the same Audit database transaction as a newly accepted `audit_event`; a duplicate producer delivery does not create another outbox row. Audit evidence delivery is disabled by default, uses bounded retry and reconciliation-required outcomes, and marks a row delivered only after a matching durable RLC acknowledgement. Operational monitoring and manual reconciliation are not yet provisioned.
+
+## Supplemental Audit source-owner evidence integration
+
+The supplemental integration is deliberately limited to Audit Service's own `audit_event` rows received through the existing Identity v1 audit-outbox and Notification template-audit consumers. It does not make Audit authoritative for Identity or Notification records, does not expose a public/Gateway route, and does not change producer contracts or Audit Search responses.
+
+Audit writes one minimized `audit_source_evidence_outbox` row only when it newly inserts an Audit event. The outbox stores the opaque Audit event UUID, exact action string, configured category/start basis, `occurred_at`, first-ingest `ingested_at`, server observation time, optional correlation ID, and delivery state. It excludes actor/resource/building identifiers, metadata, producer payloads, and case or narrative content. `recordCreatedAt` maps to the Audit-owned `ingested_at`; `occurredAt` remains the producer event time. No backfill is performed for pre-V3 rows whose ingestion time is unknown. The source revision and event version are both `1`, because Audit records are immutable; corrected/superseding Audit records are not supported by this slice. The ERD documents the owner-record relationship by identifier only; the database deliberately has no physical foreign key from the outbox to the append-only Audit table.
+
+The private endpoint is `POST /internal/v1/source-evidence/audit-events`. RLC requires the exact Audit identity subject `audit-service`, a pinned issuer and current/previous key ID/public key, RS256 signature, exact audience `rra-roomiq-records-lifecycle-audit-source-evidence`, signed `AUDIT_SOURCE_EVIDENCE_PUBLISH` permission, UUID token ID, issued-at/expiry claims and a maximum two-minute lifetime. The JSON body filter caps the request at 64 KiB. Identity Flyway V11 catalogs the dedicated permission; Audit locally signs its service token using the separate Audit key. Identity does not issue the token or dynamically evaluate its permission during delivery. Production key/TLS provisioning and permission review remain open.
+
+Both services require explicit `ACTION=CATEGORY:START_BASIS` entries, separated by semicolons. Audit settings use `AUDIT_SOURCE_EVIDENCE_MAPPINGS`; RLC independently uses `RLC_AUDIT_SOURCE_EVIDENCE_ALLOWED_MAPPINGS`. The defaults are empty, and Audit delivery is disabled by default. When an event has no valid mapping it remains `CONFIGURATION_BLOCKED`; if enabled configuration is malformed/empty or the RLC URL is not HTTPS, Audit fails startup. When the feed is enabled, configure a private HTTPS RLC ingress separately; the local Compose RLC listener is HTTP and must not be used as the enabled target. No statutory periods or production category mappings are supplied.
+
+Delivery is at-least-once. Audit holds claimed rows in a transaction while sending; a crash before commit leaves them retryable. Only a response whose event ID/revision match and whose outcome is `ACCEPTED` or `DUPLICATE` marks the row delivered. Transient transport/server errors use capped exponential backoff and move to `RECONCILIATION_REQUIRED` after ten attempts; permanent 4xx responses and invalid acknowledgements require reconciliation immediately. Delivery success alone is not acceptance, and no operator redrive/monitoring workflow is implemented. RLC Flyway V12 permits the Audit-only `RECORDED` receipt status; it does not add a new evidence table or public API.
+
+Accepted Audit evidence reaches the existing evaluator as `audit-service` / `AUDIT_EVENT`, but the current legal-hold registry covers only Booking `BOOKING_REQUEST`. The evaluator therefore returns `HOLD_STATE_UNAVAILABLE` for Audit records and cannot return positive eligibility for them until hold coverage is implemented and explicitly validated. No Audit retention period, policy activation, deletion, archive transfer, or disposal mechanism is added. Audit remains append-only.
 
 ## WP3 retention evaluation integration
 

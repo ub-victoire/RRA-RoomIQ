@@ -46,12 +46,22 @@ public class AuditEvent {
     @Column(name = "occurred_at", nullable = false)
     private Instant occurredAt;
 
+    @Column(name = "ingested_at")
+    private Instant ingestedAt;
+
     protected AuditEvent() {
     }
 
     public AuditEvent(UUID id, UUID actorUserId, String action, String resourceType, UUID resourceId,
                       UUID scopeOfficeBuildingId, String outcome, String correlationId,
                       String metadata, Instant occurredAt) {
+        this(id, actorUserId, action, resourceType, resourceId, scopeOfficeBuildingId, outcome,
+                correlationId, metadata, occurredAt, null);
+    }
+
+    public AuditEvent(UUID id, UUID actorUserId, String action, String resourceType, UUID resourceId,
+                      UUID scopeOfficeBuildingId, String outcome, String correlationId,
+                      String metadata, Instant occurredAt, Instant ingestedAt) {
         this.id = id;
         this.actorUserId = actorUserId;
         this.action = action;
@@ -62,6 +72,7 @@ public class AuditEvent {
         this.correlationId = correlationId;
         this.metadata = metadata;
         this.occurredAt = occurredAt;
+        this.ingestedAt = ingestedAt;
     }
 
     public UUID getId() { return id; }
@@ -74,4 +85,5 @@ public class AuditEvent {
     public String getCorrelationId() { return correlationId; }
     public String getMetadata() { return metadata; }
     public Instant getOccurredAt() { return occurredAt; }
+    public Instant getIngestedAt() { return ingestedAt; }
 }

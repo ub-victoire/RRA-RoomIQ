@@ -47,6 +47,17 @@ roomiq:
     identity:
       events:
         enabled: ${AUDIT_IDENTITY_EVENTS_ENABLED:true}
+    source-evidence:
+      enabled: ${AUDIT_SOURCE_EVIDENCE_ENABLED:false}
+      rlc-url: ${AUDIT_RLC_SERVICE_URL:}
+      connect-timeout: ${AUDIT_SOURCE_EVIDENCE_CONNECT_TIMEOUT:2s}
+      read-timeout: ${AUDIT_SOURCE_EVIDENCE_READ_TIMEOUT:5s}
+      relay-fixed-delay-ms: ${AUDIT_SOURCE_EVIDENCE_RELAY_FIXED_DELAY_MS:1000}
+      mappings: ${AUDIT_SOURCE_EVIDENCE_MAPPINGS:}
+      signing:
+        issuer: ${AUDIT_SERVICE_TOKEN_ISSUER:}
+        key-id: ${AUDIT_SOURCE_EVIDENCE_SIGNING_KEY_ID:}
+        private-key-location: ${AUDIT_SOURCE_EVIDENCE_SIGNING_PRIVATE_KEY_LOCATION:}
 management:
   endpoints:
     web:

@@ -18,8 +18,10 @@ import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import rw.rra.roomiq.booking.config.BookingSourceHoldAuthorizationInterceptor;
 import rw.rra.roomiq.booking.integration.BookingSourceEvidenceTokenProvider;
+import rw.rra.roomiq.audit.integration.AuditSourceEvidenceTokenProvider;
 import rw.rra.roomiq.common.web.DomainException;
 import rw.rra.roomiq.lifecycle.security.RecordsHoldServiceTokenProvider;
+import rw.rra.roomiq.lifecycle.security.AuditSourceEvidenceJwtDecoder;
 import rw.rra.roomiq.lifecycle.security.BookingSourceEvidenceJwtDecoder;
 
 import java.nio.file.Files;
@@ -47,6 +49,7 @@ class BookingRlcInteroperabilityTests {
     private String privateKey;
     private String publicKey;
     private BookingSourceEvidenceJwtDecoder evidenceDecoder;
+    private AuditSourceEvidenceJwtDecoder auditEvidenceDecoder;
     private BookingSourceHoldAuthorizationInterceptor holdVerifier;
 
     @BeforeEach
@@ -58,6 +61,7 @@ class BookingRlcInteroperabilityTests {
         publicKey = writePem("public.pem", "PUBLIC KEY", keys.getPublic().getEncoded());
         var resources = new DefaultResourceLoader();
         evidenceDecoder = new BookingSourceEvidenceJwtDecoder(resources, ISSUER, KEY_ID, publicKey, "", "");
+        auditEvidenceDecoder = new AuditSourceEvidenceJwtDecoder(resources, ISSUER, KEY_ID, publicKey, "", "");
         holdVerifier = new BookingSourceHoldAuthorizationInterceptor(resources, ISSUER, KEY_ID, publicKey, "", "");
     }
 
@@ -76,6 +80,24 @@ class BookingRlcInteroperabilityTests {
         assertThat(jwt.getAudience()).containsExactly(BookingSourceEvidenceTokenProvider.AUDIENCE);
         assertThat(jwt.getClaimAsStringList("permissions"))
                 .containsExactly(BookingSourceEvidenceTokenProvider.PERMISSION);
+        assertThat(Duration.between(jwt.getIssuedAt(), jwt.getExpiresAt())).isEqualTo(Duration.ofMinutes(2));
+    }
+
+    @Test
+    void realAuditSignerProducesTokenAcceptedByItsDedicatedRlcBoundary() {
+        assertThat(AuditSourceEvidenceTokenProvider.SUBJECT).isEqualTo(AuditSourceEvidenceJwtDecoder.SUBJECT);
+        assertThat(AuditSourceEvidenceTokenProvider.AUDIENCE).isEqualTo(AuditSourceEvidenceJwtDecoder.AUDIENCE);
+        assertThat(AuditSourceEvidenceTokenProvider.PERMISSION).isEqualTo(AuditSourceEvidenceJwtDecoder.PERMISSION);
+        var signer = new AuditSourceEvidenceTokenProvider(
+                new DefaultResourceLoader(), ISSUER, KEY_ID, privateKey);
+
+        var jwt = auditEvidenceDecoder.decode(signer.createAuthorizationHeader().substring(7));
+
+        assertThat(jwt.getIssuer().toString()).isEqualTo(ISSUER);
+        assertThat(jwt.getSubject()).isEqualTo("audit-service");
+        assertThat(jwt.getAudience()).containsExactly(AuditSourceEvidenceJwtDecoder.AUDIENCE);
+        assertThat(jwt.getClaimAsStringList("permissions"))
+                .containsExactly(AuditSourceEvidenceJwtDecoder.PERMISSION);
         assertThat(Duration.between(jwt.getIssuedAt(), jwt.getExpiresAt())).isEqualTo(Duration.ofMinutes(2));
     }
 

@@ -19,10 +19,10 @@ public interface AuditEventRepository extends Repository<AuditEvent, UUID>, Audi
     @Query(value = """
             INSERT INTO audit_event
                 (id, actor_user_id, action, resource_type, resource_id, scope_office_building_id,
-                 outcome, correlation_id, metadata, occurred_at)
+                 outcome, correlation_id, metadata, occurred_at, ingested_at)
             VALUES
                 (:id, :actorUserId, :action, :resourceType, :resourceId, :scopeOfficeBuildingId, :outcome,
-                 :correlationId, CAST(:metadata AS jsonb), :occurredAt)
+                 :correlationId, CAST(:metadata AS jsonb), :occurredAt, :ingestedAt)
             ON CONFLICT (id) DO NOTHING
             """, nativeQuery = true)
     int insertIfAbsent(@Param("id") UUID id, @Param("actorUserId") UUID actorUserId,
@@ -31,5 +31,6 @@ public interface AuditEventRepository extends Repository<AuditEvent, UUID>, Audi
                        @Param("scopeOfficeBuildingId") UUID scopeOfficeBuildingId,
                        @Param("outcome") String outcome, @Param("correlationId") String correlationId,
                        @Param("metadata") String metadata,
-                       @Param("occurredAt") Instant occurredAt);
+                       @Param("occurredAt") Instant occurredAt,
+                       @Param("ingestedAt") Instant ingestedAt);
 }

@@ -526,6 +526,25 @@ erDiagram
     varchar correlation_id
     jsonb metadata
     timestamptz occurred_at "required"
+    timestamptz ingested_at "nullable for historical rows; set once on first accepted ingest"
+  }
+
+  AUDIT_SOURCE_EVIDENCE_OUTBOX {
+    uuid audit_event_id PK "logical source ID only; no physical FK"
+    varchar action "required, max 128"
+    varchar category_code "nullable until explicitly mapped"
+    varchar start_basis_code "nullable until explicitly mapped"
+    timestamptz record_created_at "required"
+    timestamptz occurred_at "required"
+    timestamptz observed_at "required"
+    varchar correlation_id "optional, max 128"
+    varchar delivery_status "CONFIGURATION_BLOCKED PENDING DELIVERED RECONCILIATION_REQUIRED"
+    timestamptz next_attempt_at "required"
+    int attempt_count "required, nonnegative"
+    timestamptz delivered_at
+    varchar last_error_code
+    timestamptz created_at "required"
+    index due_pending "next_attempt_at, created_at WHERE delivery_status = PENDING"
   }
 
   AI_MODEL_VERSION {
@@ -630,6 +649,7 @@ erDiagram
   NOTIFICATION_TEMPLATE ||--o{ NOTIFICATION_AUDIT_OUTBOX : "audited by"
   NOTIFICATION ||--o{ DELIVERY_ATTEMPT : "1..1 to 1..N"
   NOTIFICATION ||--o{ NOTIFICATION_DELIVERY_REDRIVE : "1..1 to 0..N"
+  AUDIT_EVENT ||--o| AUDIT_SOURCE_EVIDENCE_OUTBOX : "logical owner-record association; no physical FK"
 
   AI_MODEL_VERSION ||--o{ RECOMMENDATION : "1..1 to 0..N"
   AI_MODEL_VERSION ||--o{ PREDICTION_RECORD : "1..1 to 0..N"

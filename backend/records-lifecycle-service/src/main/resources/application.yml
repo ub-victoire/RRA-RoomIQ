@@ -54,6 +54,12 @@ roomiq:
       current-public-key-location: ${BOOKING_SOURCE_EVIDENCE_CURRENT_PUBLIC_KEY_LOCATION:}
       previous-key-id: ${BOOKING_SOURCE_EVIDENCE_PREVIOUS_KEY_ID:}
       previous-public-key-location: ${BOOKING_SOURCE_EVIDENCE_PREVIOUS_PUBLIC_KEY_LOCATION:}
+    audit-service-token:
+      issuer: ${AUDIT_SERVICE_TOKEN_ISSUER:}
+      current-key-id: ${AUDIT_SOURCE_EVIDENCE_CURRENT_KEY_ID:}
+      current-public-key-location: ${AUDIT_SOURCE_EVIDENCE_CURRENT_PUBLIC_KEY_LOCATION:}
+      previous-key-id: ${AUDIT_SOURCE_EVIDENCE_PREVIOUS_KEY_ID:}
+      previous-public-key-location: ${AUDIT_SOURCE_EVIDENCE_PREVIOUS_PUBLIC_KEY_LOCATION:}
     records-lifecycle-service-token:
       issuer: ${RLC_SERVICE_TOKEN_ISSUER:}
       key-id: ${RLC_SERVICE_TOKEN_KEY_ID:}
@@ -67,6 +73,8 @@ roomiq:
       max-age: ${RLC_SOURCE_EVIDENCE_MAX_AGE:PT24H}
       booking-requests:
         allowed-categories: ${RLC_BOOKING_SOURCE_EVIDENCE_ALLOWED_CATEGORIES:}
+      audit-events:
+        allowed-mappings: ${RLC_AUDIT_SOURCE_EVIDENCE_ALLOWED_MAPPINGS:}
     booking-hold-instructions:
       enabled: ${RLC_BOOKING_HOLD_DELIVERY_ENABLED:true}
       url: ${RLC_BOOKING_HOLD_SERVICE_URL:${BOOKING_SERVICE_URL:}}

@@ -50,12 +50,15 @@ Create permission rows through the Super Admin API after bootstrap. These stable
 - `NOTIFICATION_DELIVERY_MANAGE`: inspect aggregate email delivery operations and idempotently redrive dead letters as an active global Super Admin.
 - `AUDIT_READ`: authorize Audit Search for an active global Super Admin or an active building-scoped Admin with trusted assigned building scopes.
 - `BOOKING_SOURCE_EVIDENCE_PUBLISH`: dedicated capability name for Booking's internal RLC evidence-ingestion token.
+- `AUDIT_SOURCE_EVIDENCE_PUBLISH`: dedicated capability name for Audit's internal RLC evidence-ingestion token.
 
 `CG_BOOKING` remains a separate time-bounded privilege, not a role or permission. It permits eligible booking workflows for VIP rooms only when the user's account, scope, room rules, and all scheduling constraints also allow it.
 
 `BOOKING_SOURCE_EVIDENCE_PUBLISH` is cataloged by Flyway V7 and is not granted to a user role. In the provisional S8-06 Booking-to-RLC integration, Booking signs a short-lived RS256 workload token locally and RLC validates its pinned key, issuer, exact audience, `booking-service` subject, expiry, and signed permission claim. Identity does not issue this workload token or make a runtime authorization decision for the delivery; production workload-key provisioning and RRA review remain outstanding.
 
 `BOOKING_SOURCE_HOLD_ENFORCE` is cataloged by Flyway V10 and is not automatically granted to a user role. For the reverse RLC-to-Booking hold boundary, RLC signs its own short-lived RS256 workload token; Booking validates a pinned RLC key, issuer, exact audience, subject, time claims and signed permission. Identity does not issue this token or dynamically evaluate its permission. Production workload-key and HTTPS identity provisioning and RRA review remain outstanding.
+
+`AUDIT_SOURCE_EVIDENCE_PUBLISH` is cataloged by Flyway V11 and is not granted to a user role. Audit signs a short-lived RS256 token locally for the private RLC Audit-evidence route; RLC validates a dedicated pinned issuer/key, exact Audit-specific audience and `audit-service` subject, time claims and the signed permission. Identity does not issue the workload token or make a runtime authorization decision for the delivery. Production key/TLS provisioning and RRA review remain outstanding.
 
 ## Role policy
 

@@ -86,6 +86,42 @@ public class LifecycleSecurityConfiguration {
 
     @Bean
     @Order(2)
+    public SecurityFilterChain auditEvidenceSecurityFilterChain(
+            HttpSecurity http, AuditSourceEvidenceJwtDecoder auditSourceEvidenceJwtDecoder,
+            AuditSourceEvidencePayloadFilter payloadFilter) throws Exception {
+        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+        converter.setJwtGrantedAuthoritiesConverter(jwt -> {
+            Object permissions = jwt.getClaims().get("permissions");
+            if (!(permissions instanceof Collection<?> values)) {
+                return List.of();
+            }
+            return values.stream()
+                    .filter(AuditSourceEvidenceJwtDecoder.PERMISSION::equals)
+                    .<GrantedAuthority>map(value -> new SimpleGrantedAuthority("SCOPE_" + value))
+                    .toList();
+        });
+        return http
+                .securityMatcher("/internal/v1/source-evidence/audit-events")
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(authorize -> authorize
+                        .requestMatchers(HttpMethod.POST, "/internal/v1/source-evidence/audit-events")
+                        .hasAuthority("SCOPE_" + AuditSourceEvidenceJwtDecoder.PERMISSION)
+                        .anyRequest().denyAll())
+                .formLogin(form -> form.disable())
+                .httpBasic(basic -> basic.disable())
+                .logout(logout -> logout.disable())
+                .oauth2ResourceServer(oauth2 -> oauth2
+                        .authenticationEntryPoint((request, response, exception) ->
+                                response.sendError(401, "Audit service authentication is required"))
+                        .jwt(jwt -> jwt.decoder(auditSourceEvidenceJwtDecoder)
+                                .jwtAuthenticationConverter(converter)))
+                .addFilterBefore(payloadFilter, BearerTokenAuthenticationFilter.class)
+                .build();
+    }
+
+    @Bean
+    @Order(3)
     public SecurityFilterChain lifecycleSecurityFilterChain(
             HttpSecurity http, LifecycleIdentityAuthorizationFilter authorizationFilter,
             RecordsHoldPayloadFilter recordsHoldPayloadFilter,
@@ -123,6 +159,15 @@ public class LifecycleSecurityConfiguration {
     public FilterRegistrationBean<BookingSourceEvidencePayloadFilter> bookingEvidencePayloadFilterRegistration(
             BookingSourceEvidencePayloadFilter filter) {
         FilterRegistrationBean<BookingSourceEvidencePayloadFilter> registration =
+                new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
+    public FilterRegistrationBean<AuditSourceEvidencePayloadFilter> auditEvidencePayloadFilterRegistration(
+            AuditSourceEvidencePayloadFilter filter) {
+        FilterRegistrationBean<AuditSourceEvidencePayloadFilter> registration =
                 new FilterRegistrationBean<>(filter);
         registration.setEnabled(false);
         return registration;

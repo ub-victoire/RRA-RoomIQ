@@ -30,6 +30,7 @@ public final class IdentityPermissionCodes {
     public static final String RECORDS_HOLD_MANAGE = "RECORDS_HOLD_MANAGE";
     public static final String BOOKING_SOURCE_HOLD_ENFORCE = "BOOKING_SOURCE_HOLD_ENFORCE";
     public static final String BOOKING_SOURCE_EVIDENCE_PUBLISH = "BOOKING_SOURCE_EVIDENCE_PUBLISH";
+    public static final String AUDIT_SOURCE_EVIDENCE_PUBLISH = "AUDIT_SOURCE_EVIDENCE_PUBLISH";
 
     private IdentityPermissionCodes() {
     }

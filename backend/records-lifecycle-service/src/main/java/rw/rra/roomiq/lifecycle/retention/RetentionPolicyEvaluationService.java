@@ -114,7 +114,9 @@ public class RetentionPolicyEvaluationService {
             Long acknowledgedSourceRevision,
             Map<String, ExternalScheduleResult> externalScheduleResultsByRuleCode) {
         sourceEvidenceRepository.lockRecord(sourceService, recordType, recordId);
-            List<RecordsLegalHold> holds = recordsHoldRepository.findHolds(sourceService, recordType, recordId);
+            boolean holdStateAvailable = hasHoldCoverage(sourceService, recordType);
+            List<RecordsLegalHold> holds = holdStateAvailable
+                    ? recordsHoldRepository.findHolds(sourceService, recordType, recordId) : List.of();
             List<HoldStatus> holdStatuses = holds.stream()
                     .map(hold -> HoldStatus.valueOf(hold.status().name())).toList();
             List<RecordsHoldEvaluationProvenance> holdEvidence = holds.stream()
@@ -163,11 +165,15 @@ public class RetentionPolicyEvaluationService {
 
         RetentionEvaluationEvidence evaluationInput = new RetentionEvaluationEvidence(
                 true, true, sourceEvidence.categoryCode(), sourceEvidence.authoritativeStartAt(), evaluationAt,
-                starts, externalScheduleResultsByRuleCode, true, holdStatuses);
+                starts, externalScheduleResultsByRuleCode, holdStateAvailable, holdStatuses);
         EvaluationContext context = compute(evaluationInput);
         return recordEvaluation(sourceService, recordType, recordId, receipt, acknowledgedSourceRevision,
                 evaluationAt, externalScheduleResultsByRuleCode, holdStatuses, holdEvidence,
                 evaluationInput, context);
+    }
+
+    private static boolean hasHoldCoverage(String sourceService, String recordType) {
+        return "booking-service".equals(sourceService) && "BOOKING_REQUEST".equals(recordType);
     }
 
     private SourceEvidenceEvaluationResult recordEvaluation(

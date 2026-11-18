@@ -5,6 +5,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
@@ -41,6 +43,9 @@ class IdentityAuditPersistencePostgresTests {
         registry.add("spring.datasource.password", () -> "audit-app-test-password");
         registry.add("spring.flyway.user", () -> "roomiq_audit_migrator");
         registry.add("spring.flyway.password", () -> "audit-migrator-test-password");
+        registry.add("roomiq.audit.source-evidence.mappings", () ->
+                "IDENTITY_USER_STATUS_CHANGED=TEST_AUDIT_CATEGORY:OCCURRED_AT;"
+                        + "AUTHENTICATION_FAILED=TEST_AUDIT_CATEGORY:OCCURRED_AT");
     }
 
     @Autowired
@@ -54,6 +59,9 @@ class IdentityAuditPersistencePostgresTests {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @Test
     void persistsTrustedIdentityFactsAndScopeThenDeduplicatesRedelivery() {
@@ -74,8 +82,13 @@ class IdentityAuditPersistencePostgresTests {
         assertThat(saved.getScopeOfficeBuildingId()).isEqualTo(scopeId);
         assertThat(saved.getCorrelationId()).isEqualTo("correlation-1");
         assertThat(saved.getAction()).isEqualTo("IDENTITY_USER_STATUS_CHANGED");
+        assertThat(saved.getIngestedAt()).isNotNull();
+        var firstIngestedAt = saved.getIngestedAt();
         assertThat(saved.getMetadata()).contains("\"sourceService\": \"identity-service\"")
                 .contains("\"schemaVersion\": 1");
+
+        processor.process(event);
+        assertThat(repository.findById(eventId).orElseThrow().getIngestedAt()).isEqualTo(firstIngestedAt);
     }
 
     @Test
@@ -91,6 +104,67 @@ class IdentityAuditPersistencePostgresTests {
         assertThat(saved.getResourceId()).isNull();
         assertThat(saved.getScopeOfficeBuildingId()).isNull();
         assertThat(saved.getOutcome()).isEqualTo("DENIED");
+        assertThat(saved.getIngestedAt()).isNotNull();
+    }
+
+    @Test
+    void historicalRowsMayRetainUnknownIngestionTime() {
+        UUID eventId = UUID.randomUUID();
+        jdbcTemplate.update("""
+                INSERT INTO audit_event
+                    (id, action, resource_type, outcome, occurred_at, ingested_at)
+                VALUES (?, 'HISTORICAL_EVENT', 'SYSTEM', 'SUCCESS',
+                        TIMESTAMP WITH TIME ZONE '2020-01-01T00:00:00Z', NULL)
+                """, eventId);
+
+        assertThat(repository.findById(eventId).orElseThrow().getIngestedAt()).isNull();
+    }
+
+    @Test
+    void newlyAcceptedRowsCreateMinimizedEvidenceOutboxAndExactReplayDoesNotDuplicateIt() {
+        UUID eventId = UUID.randomUUID();
+        var event = codec.decode(eventJson(eventId, "IDENTITY_USER_STATUS_CHANGED", "USER",
+                "SUCCESS", UUID.randomUUID(), UUID.randomUUID(), null, "{}", "audit-outbox-1"));
+
+        processor.process(event);
+        processor.process(event);
+
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM audit_source_evidence_outbox WHERE audit_event_id = ?
+                """, Integer.class, eventId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT delivery_status FROM audit_source_evidence_outbox WHERE audit_event_id = ?
+                """, String.class, eventId)).isEqualTo("PENDING");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT category_code FROM audit_source_evidence_outbox WHERE audit_event_id = ?
+                """, String.class, eventId)).isEqualTo("TEST_AUDIT_CATEGORY");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT record_created_at = ingested_at FROM audit_source_evidence_outbox
+                JOIN audit_event ON audit_event.id = audit_source_evidence_outbox.audit_event_id
+                WHERE audit_event_id = ?
+                """, Boolean.class, eventId)).isTrue();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT has_table_privilege(current_user,
+                    'public.audit_source_evidence_outbox', 'DELETE')
+                """, Boolean.class)).isFalse();
+    }
+
+    @Test
+    void auditRecordAndEvidenceOutboxRollBackInTheSameTransaction() {
+        UUID eventId = UUID.randomUUID();
+        var event = codec.decode(eventJson(eventId, "IDENTITY_USER_STATUS_CHANGED", "USER",
+                "SUCCESS", UUID.randomUUID(), UUID.randomUUID(), null, "{}", "audit-outbox-rollback"));
+
+        assertThatThrownBy(() -> new TransactionTemplate(transactionManager).execute(status -> {
+            processor.process(event);
+            throw new IllegalStateException("force transaction rollback");
+        })).isInstanceOf(IllegalStateException.class)
+                .hasMessage("force transaction rollback");
+
+        assertThat(repository.findById(eventId)).isEmpty();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM audit_source_evidence_outbox WHERE audit_event_id = ?
+                """, Integer.class, eventId)).isZero();
     }
 
     @Test
@@ -150,6 +224,8 @@ class IdentityAuditPersistencePostgresTests {
                 postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword()));
         assertRejectedSqlState("55000",
                 () -> ownerJdbc.execute("UPDATE audit_event SET action = 'CHANGED' WHERE id = '" + eventId + "'"));
+        assertRejectedSqlState("55000",
+                () -> ownerJdbc.execute("UPDATE audit_event SET ingested_at = NOW() WHERE id = '" + eventId + "'"));
         assertRejectedSqlState("55000",
                 () -> ownerJdbc.execute("DELETE FROM audit_event WHERE id = '" + eventId + "'"));
         assertRejectedSqlState("55000", () -> ownerJdbc.execute("TRUNCATE TABLE audit_event"));
