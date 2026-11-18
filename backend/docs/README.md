@@ -12,6 +12,19 @@ The [S8-06 Implementation Readiness Register](s8-06-implementation-readiness-reg
 
 The project-level S8-06B provisional decisions are recorded in [s8-06b-provisional-decisions.md](s8-06b-provisional-decisions.md). Those decisions are explicitly `PROVISIONALLY ADOPTED` by the `Project CTO / Project Lead`, marked `PENDING RRA REVIEW — NOT YET VALIDATED`, and intentionally do not claim RRA approval, legal validation, or production readiness.
 
+### S8-06 design decisions and requests
+
+Project-directed lifecycle design decisions and their unresolved RRA decision requests are indexed separately:
+
+- [ADR-01 — Retention eligibility is read-only](decisions/ADR-01-retention-eligibility-read-only.md)
+- [ADR-02 — Disposal is owner-local and batch-based](decisions/ADR-02-owner-local-batch-disposal.md)
+- [ADR-03 — Digest-bound authorization and separation of duties](decisions/ADR-03-digest-bound-authorization.md)
+- [ADR-04 — Owner-transaction rechecks fail closed](decisions/ADR-04-owner-transaction-rechecks.md)
+- [ADR-05 — Archive implementation is deferred](decisions/ADR-05-archive-deferred.md)
+- [ADR-06 — Disposal audit evidence is append-only](decisions/ADR-06-append-only-disposal-audit.md)
+- [ADR-07 — Audit evidence outbox uses JDBC](decisions/ADR-07-jdbc-audit-evidence-outbox.md)
+- [S8-06 Decision Request Pack](s8-06-decision-request-pack.md) — proposed Wave 0/1 sequencing of existing open decisions; statuses are unchanged.
+
 ## Stage 1 status
 
 Stage 1 and Stage 2 foundation details and the accepted Stages 3 through 6 remain documented in their service guides and the central roadmap. Scheduling owns calendar rules and availability; Room retains room status and maintenance; Booking owns confirmed occupancy and its overlap barrier. Scheduling's protected APIs use Identity authorization and Booking's fail-closed occupancy provider. The previous S6-14 regression gate passed 311 tests; final S7-08 commands and results are recorded in the [runtime validation report](runtime-validation-report.md).

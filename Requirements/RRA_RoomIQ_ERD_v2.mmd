@@ -531,20 +531,20 @@ erDiagram
 
   AUDIT_SOURCE_EVIDENCE_OUTBOX {
     uuid audit_event_id PK "logical source ID only; no physical FK"
-    varchar action "required, max 128"
-    varchar category_code "nullable until explicitly mapped"
-    varchar start_basis_code "nullable until explicitly mapped"
+    varchar(128) action "required"
+    varchar(64) category_code "nullable only for CONFIGURATION_BLOCKED; otherwise required"
+    varchar(40) start_basis_code "nullable only for CONFIGURATION_BLOCKED; otherwise required"
     timestamptz record_created_at "required"
     timestamptz occurred_at "required"
     timestamptz observed_at "required"
-    varchar correlation_id "optional, max 128"
-    varchar delivery_status "CONFIGURATION_BLOCKED PENDING DELIVERED RECONCILIATION_REQUIRED"
+    varchar(128) correlation_id "nullable"
+    varchar(32) delivery_status "required, CHECK IN CONFIGURATION_BLOCKED PENDING DELIVERED RECONCILIATION_REQUIRED"
     timestamptz next_attempt_at "required"
-    int attempt_count "required, nonnegative"
-    timestamptz delivered_at
-    varchar last_error_code
-    timestamptz created_at "required"
-    index due_pending "next_attempt_at, created_at WHERE delivery_status = PENDING"
+    int attempt_count "required default 0, CHECK >= 0"
+    timestamptz delivered_at "nullable; required iff delivery_status = DELIVERED"
+    varchar(64) last_error_code "nullable"
+    timestamptz created_at "required default CURRENT_TIMESTAMP"
+    index audit_source_evidence_outbox_due_idx "next_attempt_at, created_at WHERE delivery_status = PENDING"
   }
 
   AI_MODEL_VERSION {
