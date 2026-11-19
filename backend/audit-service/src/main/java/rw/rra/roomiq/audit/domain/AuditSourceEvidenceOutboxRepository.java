@@ -3,6 +3,8 @@ package rw.rra.roomiq.audit.domain;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -30,23 +32,48 @@ public class AuditSourceEvidenceOutboxRepository {
                 Timestamp.from(observedAt), errorCode);
     }
 
-    public List<AuditSourceEvidenceOutboxEntry> claimDue(Instant now, int limit) {
+    public List<AuditSourceEvidenceOutboxEntry> claimDue(
+            Instant now, Instant leaseExpiresAt, int limit, UUID claimToken) {
+        jdbcTemplate.update("""
+                UPDATE audit_source_evidence_outbox
+                SET attempt_count = attempt_count + 1,
+                    delivery_status = CASE
+                        WHEN attempt_count + 1 >= ? THEN 'RECONCILIATION_REQUIRED'
+                        ELSE 'PENDING'
+                    END,
+                    next_attempt_at = CASE
+                        WHEN attempt_count + 1 >= ? THEN next_attempt_at
+                        ELSE ? + make_interval(
+                            secs => LEAST(300, power(2, LEAST(attempt_count, 8)))::double precision)
+                    END,
+                    claim_token = NULL,
+                    claim_expires_at = NULL,
+                    last_error_code = 'RLC_DELIVERY_LEASE_EXPIRED'
+                WHERE delivery_status = 'PENDING'
+                  AND claim_token IS NOT NULL
+                  AND claim_expires_at <= ?
+                """, AuditSourceEvidenceOutboxTransactions.MAX_AUTOMATIC_ATTEMPTS,
+                AuditSourceEvidenceOutboxTransactions.MAX_AUTOMATIC_ATTEMPTS,
+                Timestamp.from(now), Timestamp.from(now));
+
         return jdbcTemplate.query("""
-                SELECT * FROM audit_source_evidence_outbox
-                WHERE delivery_status = 'PENDING' AND next_attempt_at <= ?
-                ORDER BY next_attempt_at, created_at
-                LIMIT ?
-                FOR UPDATE SKIP LOCKED
-                """, (resultSet, rowNumber) -> new AuditSourceEvidenceOutboxEntry(
-                resultSet.getObject("audit_event_id", UUID.class),
-                resultSet.getString("action"),
-                resultSet.getString("category_code"),
-                resultSet.getString("start_basis_code"),
-                resultSet.getTimestamp("record_created_at").toInstant(),
-                resultSet.getTimestamp("occurred_at").toInstant(),
-                resultSet.getTimestamp("observed_at").toInstant(),
-                resultSet.getString("correlation_id"),
-                resultSet.getInt("attempt_count")), Timestamp.from(now), limit);
+                WITH candidates AS (
+                    SELECT audit_event_id
+                    FROM audit_source_evidence_outbox
+                    WHERE delivery_status = 'PENDING'
+                      AND claim_token IS NULL
+                      AND next_attempt_at <= ?
+                    ORDER BY next_attempt_at, created_at
+                    LIMIT ?
+                    FOR UPDATE SKIP LOCKED
+                )
+                UPDATE audit_source_evidence_outbox AS outbox
+                SET claim_token = ?, claim_expires_at = ?
+                FROM candidates
+                WHERE outbox.audit_event_id = candidates.audit_event_id
+                RETURNING outbox.*
+                """, (resultSet, rowNumber) -> mapEntry(resultSet),
+                Timestamp.from(now), limit, claimToken, Timestamp.from(leaseExpiresAt));
     }
 
     public List<AuditSourceEvidenceOutboxEntry> configurationBlocked(int limit) {
@@ -55,16 +82,7 @@ public class AuditSourceEvidenceOutboxRepository {
                 WHERE delivery_status = 'CONFIGURATION_BLOCKED'
                 ORDER BY created_at
                 LIMIT ?
-                """, (resultSet, rowNumber) -> new AuditSourceEvidenceOutboxEntry(
-                resultSet.getObject("audit_event_id", UUID.class),
-                resultSet.getString("action"),
-                resultSet.getString("category_code"),
-                resultSet.getString("start_basis_code"),
-                resultSet.getTimestamp("record_created_at").toInstant(),
-                resultSet.getTimestamp("occurred_at").toInstant(),
-                resultSet.getTimestamp("observed_at").toInstant(),
-                resultSet.getString("correlation_id"),
-                resultSet.getInt("attempt_count")), limit);
+                """, (resultSet, rowNumber) -> mapEntry(resultSet), limit);
     }
 
     public void applyMapping(UUID eventId, String categoryCode, String startBasisCode) {
@@ -85,29 +103,46 @@ public class AuditSourceEvidenceOutboxRepository {
                 """, diagnosticCode, eventId, diagnosticCode) == 1;
     }
 
-    public void markDelivered(UUID eventId, Instant deliveredAt) {
-        jdbcTemplate.update("""
+    public boolean markDelivered(UUID eventId, UUID claimToken, Instant deliveredAt) {
+        return jdbcTemplate.update("""
                 UPDATE audit_source_evidence_outbox
-                SET delivery_status = 'DELIVERED', delivered_at = ?, last_error_code = NULL
-                WHERE audit_event_id = ? AND delivery_status = 'PENDING'
-                """, Timestamp.from(deliveredAt), eventId);
+                SET delivery_status = 'DELIVERED', delivered_at = ?, last_error_code = NULL,
+                    claim_token = NULL, claim_expires_at = NULL
+                WHERE audit_event_id = ? AND delivery_status = 'PENDING' AND claim_token = ?
+                """, Timestamp.from(deliveredAt), eventId, claimToken) == 1;
     }
 
-    public void defer(UUID eventId, Instant retryAt, String errorCode, boolean exhausted) {
-        jdbcTemplate.update("""
+    public boolean defer(
+            UUID eventId, UUID claimToken, Instant retryAt, String errorCode, boolean exhausted) {
+        return jdbcTemplate.update("""
                 UPDATE audit_source_evidence_outbox
                 SET attempt_count = attempt_count + 1, next_attempt_at = ?, last_error_code = ?,
-                    delivery_status = ?
-                WHERE audit_event_id = ? AND delivery_status = 'PENDING'
+                    delivery_status = ?, claim_token = NULL, claim_expires_at = NULL
+                WHERE audit_event_id = ? AND delivery_status = 'PENDING' AND claim_token = ?
                 """, Timestamp.from(retryAt), errorCode,
-                exhausted ? "RECONCILIATION_REQUIRED" : "PENDING", eventId);
+                exhausted ? "RECONCILIATION_REQUIRED" : "PENDING", eventId, claimToken) == 1;
     }
 
-    public void requireReconciliation(UUID eventId, String errorCode) {
-        jdbcTemplate.update("""
+    public boolean requireReconciliation(UUID eventId, UUID claimToken, String errorCode) {
+        return jdbcTemplate.update("""
                 UPDATE audit_source_evidence_outbox
-                SET delivery_status = 'RECONCILIATION_REQUIRED', last_error_code = ?
-                WHERE audit_event_id = ? AND delivery_status = 'PENDING'
-                """, errorCode, eventId);
+                SET delivery_status = 'RECONCILIATION_REQUIRED', last_error_code = ?,
+                    claim_token = NULL, claim_expires_at = NULL
+                WHERE audit_event_id = ? AND delivery_status = 'PENDING' AND claim_token = ?
+                """, errorCode, eventId, claimToken) == 1;
+    }
+
+    private static AuditSourceEvidenceOutboxEntry mapEntry(ResultSet resultSet) throws SQLException {
+        return new AuditSourceEvidenceOutboxEntry(
+                resultSet.getObject("audit_event_id", UUID.class),
+                resultSet.getString("action"),
+                resultSet.getString("category_code"),
+                resultSet.getString("start_basis_code"),
+                resultSet.getTimestamp("record_created_at").toInstant(),
+                resultSet.getTimestamp("occurred_at").toInstant(),
+                resultSet.getTimestamp("observed_at").toInstant(),
+                resultSet.getString("correlation_id"),
+                resultSet.getInt("attempt_count"),
+                resultSet.getObject("claim_token", UUID.class));
     }
 }

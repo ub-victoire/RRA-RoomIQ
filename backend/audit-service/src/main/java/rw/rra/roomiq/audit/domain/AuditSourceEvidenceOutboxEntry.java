@@ -12,5 +12,6 @@ public record AuditSourceEvidenceOutboxEntry(
         Instant occurredAt,
         Instant observedAt,
         String correlationId,
-        int attemptCount) {
+        int attemptCount,
+        UUID claimToken) {
 }
