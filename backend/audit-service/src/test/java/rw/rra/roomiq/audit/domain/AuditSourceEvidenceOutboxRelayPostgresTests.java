@@ -104,7 +104,7 @@ class AuditSourceEvidenceOutboxRelayPostgresTests {
                     .map(AuditSourceEvidenceOutboxEntry::auditEventId)
                     .toList());
             return result;
-        }).when(outboxRepository).claimDue(any(Instant.class), eq(25));
+        }).when(outboxRepository).claimDue(any(Instant.class), any(Instant.class), eq(25), any(UUID.class));
         when(deliveryClient.deliver(any())).thenAnswer(invocation -> {
             AuditSourceEvidenceOutboxEntry entry = invocation.getArgument(0);
             deliveryOrder.add(entry.auditEventId());
@@ -116,6 +116,9 @@ class AuditSourceEvidenceOutboxRelayPostgresTests {
         });
 
         Throwable failure = catchThrowable(relay::deliverPendingEvidence);
+        if (failure != null) {
+            failure.printStackTrace(System.err);
+        }
         OutboxState failed = findState(failedEventId);
         OutboxState successful = findState(successfulEventId);
 
@@ -177,6 +180,7 @@ class AuditSourceEvidenceOutboxRelayPostgresTests {
         @Bean
         AuditSourceEvidenceOutboxRelay auditSourceEvidenceOutboxRelay(
                 AuditSourceEvidenceOutboxRepository repository,
+                AuditSourceEvidenceOutboxTransactions transactions,
                 AuditSourceEvidenceDeliveryClient deliveryClient,
                 AuditSourceEvidenceOutboxService outboxService) {
             var enabledProperties = new AuditSourceEvidenceProperties(
@@ -186,7 +190,7 @@ class AuditSourceEvidenceOutboxRelayPostgresTests {
                     Duration.ofSeconds(5),
                     "AUTHENTICATION_FAILED=TEST_AUDIT_CATEGORY:OCCURRED_AT");
             return new AuditSourceEvidenceOutboxRelay(
-                    repository, enabledProperties, deliveryClient, outboxService);
+                    repository, transactions, enabledProperties, deliveryClient, outboxService);
         }
     }
 }

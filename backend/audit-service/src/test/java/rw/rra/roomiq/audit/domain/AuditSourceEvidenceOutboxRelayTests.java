@@ -8,6 +8,7 @@ import rw.rra.roomiq.audit.integration.AuditSourceEvidenceDeliveryClient;
 import rw.rra.roomiq.audit.integration.AuditSourceEvidenceProperties;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -29,7 +30,8 @@ class AuditSourceEvidenceOutboxRelayTests {
 
         fixture.relay.deliverPendingEvidence();
 
-        verify(fixture.repository).markDelivered(fixture.entry.auditEventId(), NOW);
+        verify(fixture.transactions).markDelivered(
+                fixture.entry.auditEventId(), fixture.entry.claimToken(), NOW);
     }
 
     @Test
@@ -39,8 +41,32 @@ class AuditSourceEvidenceOutboxRelayTests {
 
         fixture.relay.deliverPendingEvidence();
 
-        verify(fixture.repository).defer(
-                fixture.entry.auditEventId(), NOW.plusSeconds(1), "ResourceAccessException", false);
+        verify(fixture.transactions).defer(fixture.entry.auditEventId(), fixture.entry.claimToken(),
+                NOW.plusSeconds(1), "ResourceAccessException", false);
+    }
+
+    @Test
+    void unexpectedUncheckedDeliveryFailureIsDeferredAsTransient() {
+        var fixture = fixture(entry(0));
+        when(fixture.client.deliver(fixture.entry))
+                .thenThrow(new RuntimeException("synthetic delivery error"));
+
+        fixture.relay.deliverPendingEvidence();
+
+        verify(fixture.transactions).defer(fixture.entry.auditEventId(), fixture.entry.claimToken(),
+                NOW.plusSeconds(1), "RLC_UNEXPECTED_DELIVERY_ERROR", false);
+    }
+
+    @Test
+    void tenthFailedDeliveryRequiresReconciliation() {
+        var fixture = fixture(entry(9));
+        when(fixture.client.deliver(fixture.entry))
+                .thenThrow(new ResourceAccessException("unavailable"));
+
+        fixture.relay.deliverPendingEvidence();
+
+        verify(fixture.transactions).defer(fixture.entry.auditEventId(), fixture.entry.claimToken(),
+                NOW.plusSeconds(256), "ResourceAccessException", true);
     }
 
     @Test
@@ -51,30 +77,33 @@ class AuditSourceEvidenceOutboxRelayTests {
 
         fixture.relay.deliverPendingEvidence();
 
-        verify(fixture.repository).requireReconciliation(fixture.entry.auditEventId(), "RLC_HTTP_400");
+        verify(fixture.transactions).requireReconciliation(
+                fixture.entry.auditEventId(), fixture.entry.claimToken(), "RLC_HTTP_400");
     }
 
     private static Fixture fixture(AuditSourceEvidenceOutboxEntry entry) {
         var repository = mock(AuditSourceEvidenceOutboxRepository.class);
+        var transactions = mock(AuditSourceEvidenceOutboxTransactions.class);
         var properties = mock(AuditSourceEvidenceProperties.class);
         var client = mock(AuditSourceEvidenceDeliveryClient.class);
         var outboxService = mock(AuditSourceEvidenceOutboxService.class);
         when(properties.isEnabled()).thenReturn(true);
         when(repository.configurationBlocked(100)).thenReturn(List.of());
-        when(repository.claimDue(NOW, 25)).thenReturn(List.of(entry));
-        return new Fixture(entry, repository, client,
-                new AuditSourceEvidenceOutboxRelay(repository, properties, client, outboxService,
+        when(transactions.claimDue(NOW, NOW.plus(Duration.ofMinutes(10)), 25)).thenReturn(List.of(entry));
+        return new Fixture(entry, repository, transactions, client,
+                new AuditSourceEvidenceOutboxRelay(repository, transactions, properties, client, outboxService,
                         Clock.fixed(NOW, ZoneOffset.UTC)));
     }
 
     private static AuditSourceEvidenceOutboxEntry entry(int attempts) {
         return new AuditSourceEvidenceOutboxEntry(UUID.randomUUID(), "AUTHENTICATION_FAILED",
                 "TEST_AUDIT_CATEGORY", "OCCURRED_AT", NOW.minusSeconds(1),
-                NOW.minusSeconds(2), NOW, "correlation-1", attempts);
+                NOW.minusSeconds(2), NOW, "correlation-1", attempts, UUID.randomUUID());
     }
 
     private record Fixture(AuditSourceEvidenceOutboxEntry entry,
                            AuditSourceEvidenceOutboxRepository repository,
+                           AuditSourceEvidenceOutboxTransactions transactions,
                            AuditSourceEvidenceDeliveryClient client,
                            AuditSourceEvidenceOutboxRelay relay) {
     }
