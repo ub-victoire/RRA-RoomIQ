@@ -2,6 +2,7 @@ package rw.rra.roomiq.audit.domain;
 
 import org.assertj.core.api.SoftAssertions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,6 +15,9 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.client.ResourceAccessException;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -26,11 +30,17 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest(properties = {
@@ -43,6 +53,8 @@ import static org.mockito.Mockito.when;
 @Testcontainers
 class AuditSourceEvidenceOutboxRelayPostgresTests {
     private static final Instant DUE_AT = Instant.parse("2020-01-01T00:00:00Z");
+    private static final Instant CLAIMED_AT = Instant.parse("2025-01-01T00:00:00Z");
+    private static final Duration LEASE = Duration.ofMinutes(10);
 
     @Container
     static final PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine")
@@ -63,6 +75,12 @@ class AuditSourceEvidenceOutboxRelayPostgresTests {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private AuditSourceEvidenceOutboxTransactions transactions;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
     @MockitoSpyBean
     private AuditSourceEvidenceOutboxRepository outboxRepository;
 
@@ -76,9 +94,122 @@ class AuditSourceEvidenceOutboxRelayPostgresTests {
     void postponePendingRowsFromPriorInvocations() {
         jdbcTemplate.update("""
                 UPDATE audit_source_evidence_outbox
-                SET next_attempt_at = ?
+                SET next_attempt_at = ?, claim_token = NULL, claim_expires_at = NULL
                 WHERE category_code = 'TEST_AUDIT_CATEGORY' AND delivery_status = 'PENDING'
                 """, Timestamp.from(Instant.parse("2099-01-01T00:00:00Z")));
+    }
+
+    @Test
+    void concurrentWorkersCannotClaimTheSameRow() throws Exception {
+        UUID eventId = UUID.randomUUID();
+        insertPending(eventId, DUE_AT);
+        CountDownLatch claimed = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        UUID firstToken = UUID.randomUUID();
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(() -> new TransactionTemplate(transactionManager).execute(status -> {
+                var rows = outboxRepository.claimDue(CLAIMED_AT, CLAIMED_AT.plus(LEASE), 1, firstToken);
+                claimed.countDown();
+                try {
+                    if (!release.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Timed out waiting to release the first claim");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Interrupted while holding the first claim", exception);
+                }
+                return rows;
+            }));
+            try {
+                assertThat(claimed.await(10, TimeUnit.SECONDS)).isTrue();
+                var second = executor.submit(() ->
+                        transactions.claimDue(CLAIMED_AT, CLAIMED_AT.plus(LEASE), 1));
+                assertThat(second.get(10, TimeUnit.SECONDS)).isEmpty();
+            } finally {
+                release.countDown();
+            }
+            assertThat(first.get(10, TimeUnit.SECONDS))
+                    .extracting(AuditSourceEvidenceOutboxEntry::auditEventId)
+                    .containsExactly(eventId);
+        }
+        assertThat(transactions.claimDue(CLAIMED_AT, CLAIMED_AT.plus(LEASE), 1)).isEmpty();
+    }
+
+    @Test
+    void expiredLeaseIsReclaimedAfterAccountingAndBackoff() {
+        UUID eventId = UUID.randomUUID();
+        insertPending(eventId, DUE_AT);
+        var firstClaim = transactions.claimDue(CLAIMED_AT, CLAIMED_AT.plus(LEASE), 1).getFirst();
+        Instant expiry = CLAIMED_AT.plus(LEASE);
+
+        assertThat(transactions.claimDue(expiry, expiry.plus(LEASE), 1)).isEmpty();
+        OutboxState recovered = findState(eventId);
+        assertThat(recovered.attemptCount()).isEqualTo(1);
+        assertThat(recovered.nextAttemptAt()).isEqualTo(expiry.plusSeconds(1));
+        assertThat(recovered.deliveryStatus()).isEqualTo("PENDING");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT last_error_code FROM audit_source_evidence_outbox WHERE audit_event_id = ?
+                """, String.class, eventId)).isEqualTo("RLC_DELIVERY_LEASE_EXPIRED");
+
+        Instant retryAt = expiry.plusSeconds(1);
+        var reclaimed = transactions.claimDue(retryAt, retryAt.plus(LEASE), 1);
+        assertThat(reclaimed).hasSize(1);
+        assertThat(reclaimed.getFirst().auditEventId()).isEqualTo(eventId);
+        assertThat(reclaimed.getFirst().claimToken()).isNotEqualTo(firstClaim.claimToken());
+        assertThat(reclaimed.getFirst().attemptCount()).isEqualTo(1);
+    }
+
+    @Test
+    void staleWorkerCannotPersistAnOutcomeAfterReclaim() {
+        UUID eventId = UUID.randomUUID();
+        insertPending(eventId, DUE_AT);
+        var stale = transactions.claimDue(CLAIMED_AT, CLAIMED_AT.plus(LEASE), 1).getFirst();
+        Instant expiry = CLAIMED_AT.plus(LEASE);
+        transactions.claimDue(expiry, expiry.plus(LEASE), 1);
+        Instant retryAt = expiry.plusSeconds(1);
+        var current = transactions.claimDue(retryAt, retryAt.plus(LEASE), 1).getFirst();
+
+        assertThat(transactions.markDelivered(eventId, stale.claimToken(), retryAt)).isFalse();
+        assertThat(transactions.defer(eventId, stale.claimToken(), retryAt.plusSeconds(1),
+                "STALE_TEST", false)).isFalse();
+        assertThat(transactions.requireReconciliation(eventId, stale.claimToken(), "STALE_TEST")).isFalse();
+        assertThat(findState(eventId).deliveryStatus()).isEqualTo("PENDING");
+        assertThat(findState(eventId).attemptCount()).isEqualTo(1);
+        assertThat(transactions.markDelivered(eventId, current.claimToken(), retryAt)).isTrue();
+        assertThat(findState(eventId).deliveryStatus()).isEqualTo("DELIVERED");
+    }
+
+    @Test
+    void duplicateAcknowledgementAfterLostResponseIsHarmless() {
+        UUID eventId = UUID.randomUUID();
+        insertPending(eventId, DUE_AT);
+        when(deliveryClient.deliver(any()))
+                .thenThrow(new ResourceAccessException("synthetic lost acknowledgement"))
+                .thenReturn(new AuditSourceEvidenceDeliveryClient.DeliveryAcknowledgement(
+                        eventId, 1, "DUPLICATE"));
+
+        relay.deliverPendingEvidence();
+        assertThat(findState(eventId).deliveryStatus()).isEqualTo("PENDING");
+        assertThat(findState(eventId).attemptCount()).isEqualTo(1);
+        jdbcTemplate.update("""
+                UPDATE audit_source_evidence_outbox SET next_attempt_at = ? WHERE audit_event_id = ?
+                """, Timestamp.from(DUE_AT), eventId);
+        relay.deliverPendingEvidence();
+
+        assertThat(findState(eventId).deliveryStatus()).isEqualTo("DELIVERED");
+        assertThat(findState(eventId).attemptCount()).isEqualTo(1);
+        var deliveredAt = jdbcTemplate.queryForObject("""
+                SELECT delivered_at FROM audit_source_evidence_outbox WHERE audit_event_id = ?
+                """, Timestamp.class, eventId);
+        relay.deliverPendingEvidence();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT delivered_at FROM audit_source_evidence_outbox WHERE audit_event_id = ?
+                """, Timestamp.class, eventId)).isEqualTo(deliveredAt);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT count(*) FROM audit_source_evidence_outbox WHERE audit_event_id = ?
+                """, Integer.class, eventId)).isEqualTo(1);
+        verify(deliveryClient, times(2)).deliver(any());
     }
 
     @ParameterizedTest(name = "bad row first={0}")
