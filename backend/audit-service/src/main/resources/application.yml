@@ -62,7 +62,11 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+      show-components: when-authorized
 logging:
   level:
     root: INFO
