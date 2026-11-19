@@ -116,9 +116,6 @@ class AuditSourceEvidenceOutboxRelayPostgresTests {
         });
 
         Throwable failure = catchThrowable(relay::deliverPendingEvidence);
-        if (failure != null) {
-            failure.printStackTrace(System.err);
-        }
         OutboxState failed = findState(failedEventId);
         OutboxState successful = findState(successfulEventId);
 

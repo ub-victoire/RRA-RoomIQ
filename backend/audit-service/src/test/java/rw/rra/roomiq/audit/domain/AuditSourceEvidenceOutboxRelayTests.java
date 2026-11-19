@@ -14,6 +14,9 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -90,6 +93,10 @@ class AuditSourceEvidenceOutboxRelayTests {
         when(properties.isEnabled()).thenReturn(true);
         when(repository.configurationBlocked(100)).thenReturn(List.of());
         when(transactions.claimDue(NOW, NOW.plus(Duration.ofMinutes(10)), 25)).thenReturn(List.of(entry));
+        when(transactions.markDelivered(any(UUID.class), any(UUID.class), any(Instant.class))).thenReturn(true);
+        when(transactions.defer(any(UUID.class), any(UUID.class), any(Instant.class),
+                anyString(), anyBoolean())).thenReturn(true);
+        when(transactions.requireReconciliation(any(UUID.class), any(UUID.class), anyString())).thenReturn(true);
         return new Fixture(entry, repository, transactions, client,
                 new AuditSourceEvidenceOutboxRelay(repository, transactions, properties, client, outboxService,
                         Clock.fixed(NOW, ZoneOffset.UTC)));
