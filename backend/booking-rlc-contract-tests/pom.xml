@@ -20,16 +20,19 @@
             <groupId>rw.rra.roomiq</groupId>
             <artifactId>booking-service</artifactId>
             <version>1.0.0-SNAPSHOT</version>
+            <classifier>plain</classifier>
         </dependency>
         <dependency>
             <groupId>rw.rra.roomiq</groupId>
             <artifactId>records-lifecycle-service</artifactId>
             <version>1.0.0-SNAPSHOT</version>
+            <classifier>plain</classifier>
         </dependency>
         <dependency>
             <groupId>rw.rra.roomiq</groupId>
             <artifactId>audit-service</artifactId>
             <version>1.0.0-SNAPSHOT</version>
+            <classifier>plain</classifier>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
