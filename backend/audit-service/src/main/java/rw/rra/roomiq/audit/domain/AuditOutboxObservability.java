@@ -5,6 +5,7 @@ import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.context.annotation.Bean;
@@ -14,6 +15,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import rw.rra.roomiq.audit.integration.AuditSourceEvidenceProperties;
 
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -22,16 +24,27 @@ import java.util.Map;
 
 @Component
 public class AuditOutboxObservability {
-    private static final Duration STALENESS = Duration.ofHours(1);
     private static final Logger log = LoggerFactory.getLogger(AuditOutboxObservability.class);
     private final JdbcTemplate jdbc;
+    private final AuditSourceEvidenceProperties sourceEvidence;
+    private final Duration warnAfter;
+    private final Duration downAfter;
     private final Counter attempts;
     private final Counter retries;
     private final Counter terminal;
     private final Counter reclaims;
 
-    public AuditOutboxObservability(JdbcTemplate jdbc, MeterRegistry registry) {
+    public AuditOutboxObservability(JdbcTemplate jdbc, MeterRegistry registry,
+                                    AuditSourceEvidenceProperties sourceEvidence,
+                                    @Value("${roomiq.audit.outbox.health.warn-after:15m}") Duration warnAfter,
+                                    @Value("${roomiq.audit.outbox.health.down-after:1h}") Duration downAfter) {
+        if (warnAfter.isZero() || warnAfter.isNegative() || downAfter.compareTo(warnAfter) <= 0) {
+            throw new IllegalArgumentException("Outbox health thresholds must be positive and down must exceed warn");
+        }
         this.jdbc = jdbc;
+        this.sourceEvidence = sourceEvidence;
+        this.warnAfter = warnAfter;
+        this.downAfter = downAfter;
         this.attempts = registry.counter("roomiq.audit.outbox.delivery.attempts");
         this.retries = registry.counter("roomiq.audit.outbox.retries");
         this.terminal = registry.counter("roomiq.audit.outbox.terminal");
@@ -90,19 +103,34 @@ public class AuditOutboxObservability {
 
     private double oldestPendingSeconds() {
         Timestamp oldest = jdbc.queryForObject(
-                "SELECT MIN(created_at) FROM audit_source_evidence_outbox WHERE delivery_status = 'PENDING'",
+                """
+                SELECT MIN(next_attempt_at) FROM audit_source_evidence_outbox
+                WHERE delivery_status = 'PENDING' AND claim_token IS NULL
+                  AND next_attempt_at <= CURRENT_TIMESTAMP
+                """,
                 Timestamp.class);
         return oldest == null ? 0 : Math.max(0, Duration.between(oldest.toInstant(), Instant.now()).toMillis() / 1000.0);
     }
 
     Health health() {
+        if (!sourceEvidence.isEnabled()) {
+            return Health.up().withDetail("deliveryEnabled", false).build();
+        }
         try {
             long pending = count("PENDING");
+            long reconciliation = count("RECONCILIATION_REQUIRED");
+            long blocked = count("CONFIGURATION_BLOCKED");
             double oldest = oldestPendingSeconds();
-            return (oldest >= STALENESS.toSeconds() ? Health.down() : Health.up())
+            Health.Builder builder = oldest >= downAfter.toMillis() / 1000.0 ? Health.down()
+                    : reconciliation > 0 || oldest >= warnAfter.toMillis() / 1000.0
+                    ? Health.status("DEGRADED") : Health.up();
+            return builder.withDetail("deliveryEnabled", true)
                     .withDetail("pending", pending)
+                    .withDetail("reconciliationRequired", reconciliation)
+                    .withDetail("blocked", blocked)
                     .withDetail("oldestPendingSeconds", oldest)
-                    .withDetail("staleAfterSeconds", STALENESS.toSeconds())
+                    .withDetail("warnAfterSeconds", warnAfter.toMillis() / 1000.0)
+                    .withDetail("downAfterSeconds", downAfter.toMillis() / 1000.0)
                     .build();
         } catch (DataAccessException exception) {
             log.warn("Audit outbox health query failed errorCode=AUDIT_OUTBOX_HEALTH_QUERY_FAILED");

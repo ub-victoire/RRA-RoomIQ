@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.core.env.Environment;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
@@ -15,6 +16,8 @@ import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -39,6 +42,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = {
@@ -86,8 +90,15 @@ class AuditOutboxObservabilityPostgresTests {
     @Autowired
     private AuditOutboxObservability observability;
 
+    @Autowired
+    private Environment environment;
+
+    @MockitoBean
+    private AuditSourceEvidenceProperties sourceEvidenceProperties;
+
     @BeforeEach
     void clearOutbox() throws Exception {
+        when(sourceEvidenceProperties.isEnabled()).thenReturn(true);
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(),
                 "roomiq_audit_migrator", "audit-migrator-test-password");
              var statement = connection.createStatement()) {
@@ -111,6 +122,101 @@ class AuditOutboxObservabilityPostgresTests {
         }
         assertThat(meters.get("roomiq.audit.outbox.oldest.pending.seconds").gauge().value())
                 .isGreaterThanOrEqualTo(7200);
+    }
+
+    @Test
+    void stalenessIgnoresBackoffAndLeasedRowsAndUsesDueTime() {
+        UUID due = insert("PENDING", "2 hours");
+        UUID backoff = insert("PENDING", "3 hours");
+        UUID leased = insert("PENDING", "4 hours");
+        UUID expiredLease = insert("PENDING", "5 hours");
+        jdbc.update("""
+                UPDATE audit_source_evidence_outbox SET next_attempt_at = CURRENT_TIMESTAMP - INTERVAL '5 minutes'
+                WHERE audit_event_id = ?
+                """, due);
+        jdbc.update("""
+                UPDATE audit_source_evidence_outbox SET next_attempt_at = CURRENT_TIMESTAMP + INTERVAL '30 minutes'
+                WHERE audit_event_id = ?
+                """, backoff);
+        jdbc.update("""
+                UPDATE audit_source_evidence_outbox SET claim_token = ?, claim_expires_at = CURRENT_TIMESTAMP + INTERVAL '10 minutes'
+                WHERE audit_event_id = ?
+                """, UUID.randomUUID(), leased);
+        jdbc.update("""
+                UPDATE audit_source_evidence_outbox SET claim_token = ?, claim_expires_at = CURRENT_TIMESTAMP - INTERVAL '1 minute'
+                WHERE audit_event_id = ?
+                """, UUID.randomUUID(), expiredLease);
+        assertThat(meters.get("roomiq.audit.outbox.oldest.pending.seconds").gauge().value())
+                .isBetween(300.0, 330.0);
+        assertThat(observability.health().getStatus().getCode()).isEqualTo("UP");
+        jdbc.update("""
+                UPDATE audit_source_evidence_outbox SET next_attempt_at = CURRENT_TIMESTAMP + INTERVAL '30 minutes'
+                WHERE audit_event_id = ?
+                """, due);
+        assertThat(meters.get("roomiq.audit.outbox.oldest.pending.seconds").gauge().value()).isZero();
+    }
+
+    @Test
+    void provisionalThresholdsMarkWarnAndDownAtTheirBoundaries() {
+        assertThat(environment.getProperty("roomiq.audit.outbox.health.warn-after")).isEqualTo("15m");
+        assertThat(environment.getProperty("roomiq.audit.outbox.health.down-after")).isEqualTo("1h");
+        UUID due = insert("PENDING", "14 minutes");
+        assertThat(observability.health().getStatus().getCode()).isEqualTo("UP");
+        jdbc.update("""
+                UPDATE audit_source_evidence_outbox SET next_attempt_at = CURRENT_TIMESTAMP - INTERVAL '15 minutes'
+                WHERE audit_event_id = ?
+                """, due);
+        assertThat(observability.health().getStatus().getCode()).isEqualTo("DEGRADED");
+        jdbc.update("""
+                UPDATE audit_source_evidence_outbox SET next_attempt_at = CURRENT_TIMESTAMP - INTERVAL '1 hour'
+                WHERE audit_event_id = ?
+                """, due);
+        assertThat(observability.health().getStatus().getCode()).isEqualTo("DOWN");
+    }
+
+    @Test
+    void disabledDeliveryIsUpDespiteStaleOrReconciliationRows() {
+        when(sourceEvidenceProperties.isEnabled()).thenReturn(false);
+        insert("PENDING", "2 hours");
+        insert("RECONCILIATION_REQUIRED", "1 minute");
+        var health = observability.health();
+        assertThat(health.getStatus().getCode()).isEqualTo("UP");
+        assertThat(health.getDetails()).containsEntry("deliveryEnabled", false);
+    }
+
+    @Test
+    void reconciliationDegradesButBlockedAloneDoesNot() {
+        insert("CONFIGURATION_BLOCKED", "2 hours");
+        assertThat(observability.health().getStatus().getCode()).isEqualTo("UP");
+        insert("RECONCILIATION_REQUIRED", "1 minute");
+        assertThat(observability.health().getStatus().getCode()).isEqualTo("DEGRADED");
+        insert("PENDING", "2 hours");
+        assertThat(observability.health().getStatus().getCode()).isEqualTo("DOWN");
+    }
+
+    @Test
+    void probesExcludeOutboxEvenWhenRootHealthIsDown() throws Exception {
+        insert("PENDING", "2 hours");
+        mockMvc.perform(get("/actuator/health").header("Authorization", "Bearer " + token()))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.components.outbox.status").value("DOWN"));
+        for (String group : Set.of("liveness", "readiness")) {
+            mockMvc.perform(get("/actuator/health/" + group).header("Authorization", "Bearer " + token()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("UP"))
+                    .andExpect(jsonPath("$.components.outbox").doesNotExist());
+        }
+    }
+
+    @Test
+    void degradedStatusIsPreservedByAggregateHealth() throws Exception {
+        insert("RECONCILIATION_REQUIRED", "1 minute");
+        mockMvc.perform(get("/actuator/health").header("Authorization", "Bearer " + token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("DEGRADED"));
+        mockMvc.perform(get("/actuator/health"))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"status\":\"DEGRADED\"}", JsonCompareMode.STRICT));
     }
 
     @Test
@@ -264,6 +370,7 @@ class AuditOutboxObservabilityPostgresTests {
         insert("PENDING", "2 hours");
         var response = mockMvc.perform(get("/actuator/health"))
                 .andExpect(status().isServiceUnavailable())
+                .andExpect(content().json("{\"status\":\"DOWN\"}", JsonCompareMode.STRICT))
                 .andReturn().getResponse().getContentAsString();
         assertThat(response).doesNotContain("pending", "Pending", "count", "Count", "age", "Age", "threshold");
         assertThat(response).doesNotContain("components", "details");
@@ -271,6 +378,9 @@ class AuditOutboxObservabilityPostgresTests {
 
     @Test
     void freshOrEmptyBacklogIsHealthy() throws Exception {
+        mockMvc.perform(get("/actuator/health"))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"status\":\"UP\"}", JsonCompareMode.STRICT));
         mockMvc.perform(get("/actuator/health/outbox").header("Authorization", "Bearer " + token()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.details.pending").value(0))
@@ -299,10 +409,10 @@ class AuditOutboxObservabilityPostgresTests {
                     occurred_at, observed_at, delivery_status, next_attempt_at, attempt_count,
                     delivered_at, created_at)
                 VALUES (?, 'SYNTHETIC', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
-                        ?, CURRENT_TIMESTAMP, 0, ?, CURRENT_TIMESTAMP - CAST(? AS INTERVAL))
+                        ?, CURRENT_TIMESTAMP - CAST(? AS INTERVAL), 0, ?, CURRENT_TIMESTAMP - CAST(? AS INTERVAL))
                 """, eventId, status.equals("CONFIGURATION_BLOCKED") ? null : "TEST_CATEGORY",
                 status.equals("CONFIGURATION_BLOCKED") ? null : "OCCURRED_AT", status,
-                status.equals("DELIVERED") ? java.sql.Timestamp.from(Instant.now()) : null, age);
+                age, status.equals("DELIVERED") ? java.sql.Timestamp.from(Instant.now()) : null, age);
         return eventId;
     }
 
