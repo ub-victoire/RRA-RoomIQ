@@ -43,18 +43,7 @@ public class RetentionPolicyEvaluationService {
                                             RecordsHoldRepository recordsHoldRepository,
                                             RetentionEvaluationHistoryRepository historyRepository,
                                             @Value("${roomiq.lifecycle.source-evidence.max-age:PT24H}")
-                                            Duration sourceEvidenceMaxAge) {
-        this(versionRepository, ruleRepository, calculator, sourceEvidenceRepository, recordsHoldRepository,
-                historyRepository, sourceEvidenceMaxAge, Clock.systemUTC());
-    }
-
-    RetentionPolicyEvaluationService(LifecyclePolicyVersionRepository versionRepository,
-                                     LifecyclePolicyRuleRepository ruleRepository,
-                                     RetentionEligibilityCalculator calculator,
-                                     SourceOwnerEvidenceRepository sourceEvidenceRepository,
-                                     RecordsHoldRepository recordsHoldRepository,
-                                     RetentionEvaluationHistoryRepository historyRepository,
-                                     Duration sourceEvidenceMaxAge, Clock clock) {
+                                            Duration sourceEvidenceMaxAge, Clock clock) {
         this.versionRepository = versionRepository;
         this.ruleRepository = ruleRepository;
         this.calculator = calculator;
@@ -74,6 +63,17 @@ public class RetentionPolicyEvaluationService {
             return calculator.evaluate(null);
         }
 
+        return compute(new RetentionEvaluationEvidence(evidence.ownerKnown(), evidence.ownerAcknowledged(),
+                evidence.categoryCode(), evidence.authoritativeStartAt(), clock.instant(),
+                evidence.startTimestampsByBasis(), evidence.externalScheduleResultsByRuleCode(),
+                evidence.holdStateAvailable(), evidence.holdStatuses())).result();
+    }
+
+    @Transactional(readOnly = true)
+    public RetentionEvaluationResult evaluateAt(RetentionEvaluationEvidence evidence) {
+        if (evidence == null) {
+            return calculator.evaluate(null);
+        }
         return compute(evidence).result();
     }
 
@@ -107,6 +107,28 @@ public class RetentionPolicyEvaluationService {
 
     @Transactional
     public SourceEvidenceEvaluationResult evaluateLatestEvidence(
+            String sourceService,
+            String recordType,
+            String recordId,
+            Long acknowledgedSourceRevision,
+            Map<String, ExternalScheduleResult> externalScheduleResultsByRuleCode) {
+        return evaluateLatestEvidenceAtTime(sourceService, recordType, recordId, clock.instant(),
+                acknowledgedSourceRevision, externalScheduleResultsByRuleCode);
+    }
+
+    @Transactional
+    public SourceEvidenceEvaluationResult evaluateLatestEvidenceAt(
+            String sourceService,
+            String recordType,
+            String recordId,
+            Instant evaluationAt,
+            Long acknowledgedSourceRevision,
+            Map<String, ExternalScheduleResult> externalScheduleResultsByRuleCode) {
+        return evaluateLatestEvidenceAtTime(sourceService, recordType, recordId, evaluationAt,
+                acknowledgedSourceRevision, externalScheduleResultsByRuleCode);
+    }
+
+    private SourceEvidenceEvaluationResult evaluateLatestEvidenceAtTime(
             String sourceService,
             String recordType,
             String recordId,
