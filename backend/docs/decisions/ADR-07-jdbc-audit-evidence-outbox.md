@@ -18,4 +18,8 @@ Keep the outbox JDBC-managed. Do not add a JPA entity for `AUDIT_SOURCE_EVIDENCE
 - ERD documentation records SQL widths, nullability, defaults, checks, and the actual due-index name.
 - Runtime outbox `DELETE` and `TRUNCATE` remain denied by grants; mutable delivery-state updates remain supported.
 
+## Relay locking update
+
+The relay replaces the batch-long row lock with a short `FOR UPDATE SKIP LOCKED` claim transaction and a 10-minute lease. Outcome updates use the claim token for fencing and commit per row; the HTTP call is outside the claim transaction. Expired claims are recovered with retry accounting. Delivery remains at least once: a slow or resumed worker may overlap another attempt after lease expiry, because token fencing protects local state rather than preventing duplicate HTTP requests.
+
 This project direction documents the implementation boundary and does not change privileges or migrations.

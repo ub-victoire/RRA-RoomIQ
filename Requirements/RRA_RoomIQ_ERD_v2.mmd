@@ -544,7 +544,11 @@ erDiagram
     timestamptz delivered_at "nullable; required iff delivery_status = DELIVERED"
     varchar(64) last_error_code "nullable"
     timestamptz created_at "required default CURRENT_TIMESTAMP"
+    uuid claim_token "nullable; paired with claim_expires_at under claim lease CHECK"
+    timestamptz claim_expires_at "nullable; paired with claim_token under claim lease CHECK"
     index audit_source_evidence_outbox_due_idx "next_attempt_at, created_at WHERE delivery_status = PENDING"
+    index audit_source_evidence_outbox_claim_expiry_idx "claim_expires_at WHERE delivery_status = PENDING AND claim_token IS NOT NULL"
+    check audit_source_evidence_outbox_claim_lease_check "both claim fields NULL or both NOT NULL with delivery_status = PENDING"
   }
 
   AI_MODEL_VERSION {
