@@ -43,7 +43,7 @@ public class AuditSourceEvidenceOutboxRepository {
                     END,
                     next_attempt_at = CASE
                         WHEN attempt_count + 1 >= ? THEN next_attempt_at
-                        ELSE ? + make_interval(
+                        ELSE CAST(? AS TIMESTAMP WITH TIME ZONE) + make_interval(
                             secs => LEAST(300, power(2, LEAST(attempt_count, 8)))::double precision)
                     END,
                     claim_token = NULL,
