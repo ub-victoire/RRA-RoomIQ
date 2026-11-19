@@ -2,9 +2,9 @@
 
 **Purpose:** organize the existing S8-06A decision requests for review and sequencing.
 
-**Status:** Recommendations only. No decision in this pack is approved. The [readiness register](s8-06-implementation-readiness-register.md) remains authoritative; its 36 original S8-06A records remain `OPEN` with blank approval fields. This pack does not modify their statuses.
+**Status:** Recommendations only. No decision in this pack is a formal RRA decision or approval. The [readiness register](s8-06-implementation-readiness-register.md) remains authoritative; all 36 original S8-06A IDs and their historical `OPEN` statuses are preserved. Thirty-four design-side technical dispositions are now recorded under delegated technical authority in ADR-08 through ADR-14; S8-06A-AI-01 and S8-06A-TEST-01 remain open. Real retention values and legal citations remain data pending from Legal/Records Management; production provisioning and formal RRA policy approval remain pending/outside engineering authority.
 
-The repository does not define “Wave 0” or “Wave 1.” The wave assignment below is a proposed dependency order for discussion, not a new approval state or a change to the original decision records. Wave 0 covers policy, scope, authority, and ownership prerequisites. Wave 1 covers exact archive, hold, disposal, security, operations, and verification controls. A recommendation or code-unblock description does not authorize implementation; exact code/schema/API changes still require their applicable approvals.
+The repository does not define “Wave 0” or “Wave 1.” The wave assignment below is a proposed dependency order for discussion, not a new approval state or a change to the original decision records. Wave 0 covers policy, scope, authority, and ownership prerequisites. Wave 1 covers exact archive, hold, disposal, security, operations, and verification controls. A recommendation or code-unblock description does not authorize implementation; exact code/schema/API changes still require their applicable approvals. ADR-08 through ADR-14 record delegated design-side decisions only and do not supply legal facts or production approval.
 
 ## Wave 0 — governance, policy, and ownership prerequisites
 
