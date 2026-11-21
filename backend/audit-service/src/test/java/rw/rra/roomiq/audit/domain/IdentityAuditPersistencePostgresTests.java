@@ -182,6 +182,9 @@ class IdentityAuditPersistencePostgresTests {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("reused with different content");
         assertThat(repository.findById(eventId)).isPresent();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM audit_source_evidence_outbox WHERE audit_event_id = ?
+                """, Integer.class, eventId)).isEqualTo(1);
     }
 
     @Test
@@ -201,6 +204,56 @@ class IdentityAuditPersistencePostgresTests {
         assertThat(repository.findById(eventId)).isPresent();
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM audit_event WHERE id = ?", Integer.class, eventId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM audit_source_evidence_outbox WHERE audit_event_id = ?
+                """, Integer.class, eventId)).isEqualTo(1);
+    }
+
+    @Test
+    void outboxInsertFailureRollsBackNewAuditRecord() {
+        UUID eventId = UUID.randomUUID();
+        var event = codec.decode(eventJson(eventId, "IDENTITY_USER_STATUS_CHANGED", "USER",
+                "SUCCESS", UUID.randomUUID(), UUID.randomUUID(), null, "{}", "audit-outbox-insert-failure"));
+        jdbcTemplate.update("""
+                INSERT INTO audit_source_evidence_outbox (
+                    audit_event_id, action, category_code, start_basis_code, record_created_at,
+                    occurred_at, observed_at, delivery_status, next_attempt_at, attempt_count)
+                VALUES (?, 'IDENTITY_USER_STATUS_CHANGED', 'TEST_AUDIT_CATEGORY', 'OCCURRED_AT',
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'PENDING', CURRENT_TIMESTAMP, 0)
+                """, eventId);
+
+        assertRejectedSqlState("23505", () -> processor.process(event));
+
+        assertThat(repository.findById(eventId)).isEmpty();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM audit_source_evidence_outbox WHERE audit_event_id = ?
+                """, Integer.class, eventId)).isEqualTo(1);
+    }
+
+    @Test
+    void runtimeRoleCanReadInsertAndUpdateOutboxButCannotDeleteOrTruncate() {
+        UUID eventId = UUID.randomUUID();
+        assertThat(jdbcTemplate.update("""
+                INSERT INTO audit_source_evidence_outbox (
+                    audit_event_id, action, category_code, start_basis_code, record_created_at,
+                    occurred_at, observed_at, delivery_status, next_attempt_at, attempt_count)
+                VALUES (?, 'IDENTITY_USER_STATUS_CHANGED', 'TEST_AUDIT_CATEGORY', 'OCCURRED_AT',
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'PENDING', CURRENT_TIMESTAMP, 0)
+                """, eventId)).isEqualTo(1);
+        assertThat(jdbcTemplate.update("""
+                UPDATE audit_source_evidence_outbox SET last_error_code = 'TEST_GRANT' WHERE audit_event_id = ?
+                """, eventId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT last_error_code FROM audit_source_evidence_outbox WHERE audit_event_id = ?
+                """, String.class, eventId)).isEqualTo("TEST_GRANT");
+
+        assertRejectedSqlState("42501", () -> jdbcTemplate.update(
+                "DELETE FROM audit_source_evidence_outbox WHERE audit_event_id = ?", eventId));
+        assertRejectedSqlState("42501", () -> jdbcTemplate.execute(
+                "TRUNCATE TABLE audit_source_evidence_outbox"));
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM audit_source_evidence_outbox WHERE audit_event_id = ?
+                """, Integer.class, eventId)).isEqualTo(1);
     }
 
     @Test
