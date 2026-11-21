@@ -8,4 +8,6 @@ Decision: Technical, architectural and safe-default decisions for RoomIQ Stage 8
 
 Limits: Delegation covers design and controls only. It does not create legal facts (retention periods, legal citations, hold authority), which remain data supplied by Legal/Records Management.
 
+Operational safe default (2026-11-19): Audit outbox staleness warning and down thresholds default to 15 minutes and 1 hour, respectively, and are configurable. These provisional thresholds are not SLOs.
+
 Closes: S8-06A-POL-02, S8-06A-TECH-01.

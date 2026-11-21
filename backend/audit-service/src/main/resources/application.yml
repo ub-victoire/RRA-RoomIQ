@@ -44,6 +44,10 @@ roomiq:
   auth:
     jwt-secret: ${JWT_SECRET:}
   audit:
+    outbox:
+      health:
+        warn-after: ${AUDIT_OUTBOX_HEALTH_WARN_AFTER:15m}
+        down-after: ${AUDIT_OUTBOX_HEALTH_DOWN_AFTER:1h}
     identity:
       events:
         enabled: ${AUDIT_IDENTITY_EVENTS_ENABLED:true}
@@ -62,7 +66,20 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+      show-components: when-authorized
+      probes:
+        enabled: true
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState
+      status:
+        order: DOWN,OUT_OF_SERVICE,DEGRADED,UNKNOWN,UP
 logging:
   level:
     root: INFO

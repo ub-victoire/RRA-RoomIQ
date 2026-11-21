@@ -13,9 +13,11 @@ import java.util.UUID;
 @Repository
 public class AuditSourceEvidenceOutboxRepository {
     private final JdbcTemplate jdbcTemplate;
+    private final AuditOutboxObservability observability;
 
-    public AuditSourceEvidenceOutboxRepository(JdbcTemplate jdbcTemplate) {
+    public AuditSourceEvidenceOutboxRepository(JdbcTemplate jdbcTemplate, AuditOutboxObservability observability) {
         this.jdbcTemplate = jdbcTemplate;
+        this.observability = observability;
     }
 
     public void insert(AuditEvent event, String categoryCode, String startBasisCode,
@@ -34,7 +36,8 @@ public class AuditSourceEvidenceOutboxRepository {
 
     public List<AuditSourceEvidenceOutboxEntry> claimDue(
             Instant now, Instant leaseExpiresAt, int limit, UUID claimToken) {
-        jdbcTemplate.update("""
+        RecoveredLeases recovered = jdbcTemplate.queryForObject("""
+                WITH recovered AS (
                 UPDATE audit_source_evidence_outbox
                 SET attempt_count = attempt_count + 1,
                     delivery_status = CASE
@@ -52,9 +55,16 @@ public class AuditSourceEvidenceOutboxRepository {
                 WHERE delivery_status = 'PENDING'
                   AND claim_token IS NOT NULL
                   AND claim_expires_at <= ?
-                """, AuditSourceEvidenceOutboxTransactions.MAX_AUTOMATIC_ATTEMPTS,
+                RETURNING delivery_status
+                )
+                SELECT count(*) AS total,
+                       count(*) FILTER (WHERE delivery_status = 'RECONCILIATION_REQUIRED') AS terminal
+                FROM recovered
+                """, (rs, row) -> new RecoveredLeases(rs.getLong("total"), rs.getLong("terminal")),
+                AuditSourceEvidenceOutboxTransactions.MAX_AUTOMATIC_ATTEMPTS,
                 AuditSourceEvidenceOutboxTransactions.MAX_AUTOMATIC_ATTEMPTS,
                 Timestamp.from(now), Timestamp.from(now));
+        observability.leasesRecovered(recovered.total(), recovered.terminal());
 
         return jdbcTemplate.query("""
                 WITH candidates AS (
@@ -114,22 +124,34 @@ public class AuditSourceEvidenceOutboxRepository {
 
     public boolean defer(
             UUID eventId, UUID claimToken, Instant retryAt, String errorCode, boolean exhausted) {
-        return jdbcTemplate.update("""
+        boolean updated = jdbcTemplate.update("""
                 UPDATE audit_source_evidence_outbox
                 SET attempt_count = attempt_count + 1, next_attempt_at = ?, last_error_code = ?,
                     delivery_status = ?, claim_token = NULL, claim_expires_at = NULL
                 WHERE audit_event_id = ? AND delivery_status = 'PENDING' AND claim_token = ?
                 """, Timestamp.from(retryAt), errorCode,
                 exhausted ? "RECONCILIATION_REQUIRED" : "PENDING", eventId, claimToken) == 1;
+        if (updated) {
+            if (exhausted) {
+                observability.terminalCommitted();
+            } else {
+                observability.retryCommitted();
+            }
+        }
+        return updated;
     }
 
     public boolean requireReconciliation(UUID eventId, UUID claimToken, String errorCode) {
-        return jdbcTemplate.update("""
+        boolean updated = jdbcTemplate.update("""
                 UPDATE audit_source_evidence_outbox
                 SET delivery_status = 'RECONCILIATION_REQUIRED', last_error_code = ?,
                     claim_token = NULL, claim_expires_at = NULL
                 WHERE audit_event_id = ? AND delivery_status = 'PENDING' AND claim_token = ?
                 """, errorCode, eventId, claimToken) == 1;
+        if (updated) {
+            observability.terminalCommitted();
+        }
+        return updated;
     }
 
     private static AuditSourceEvidenceOutboxEntry mapEntry(ResultSet resultSet) throws SQLException {
@@ -144,5 +166,8 @@ public class AuditSourceEvidenceOutboxRepository {
                 resultSet.getString("correlation_id"),
                 resultSet.getInt("attempt_count"),
                 resultSet.getObject("claim_token", UUID.class));
+    }
+
+    private record RecoveredLeases(long total, long terminal) {
     }
 }

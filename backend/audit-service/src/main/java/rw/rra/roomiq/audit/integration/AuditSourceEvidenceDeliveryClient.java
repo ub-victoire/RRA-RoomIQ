@@ -6,6 +6,7 @@ import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import rw.rra.roomiq.audit.domain.AuditSourceEvidenceOutboxEntry;
+import rw.rra.roomiq.audit.domain.AuditOutboxObservability;
 
 import java.net.http.HttpClient;
 import java.time.Instant;
@@ -17,9 +18,11 @@ public class AuditSourceEvidenceDeliveryClient {
     private static final String INGESTION_PATH = "/internal/v1/source-evidence/audit-events";
     private final RestClient restClient;
     private final AuditSourceEvidenceTokenProvider tokenProvider;
+    private final AuditOutboxObservability observability;
 
     public AuditSourceEvidenceDeliveryClient(AuditSourceEvidenceProperties properties,
-                                            AuditSourceEvidenceTokenProvider tokenProvider) {
+                                            AuditSourceEvidenceTokenProvider tokenProvider,
+                                            AuditOutboxObservability observability) {
         HttpClient httpClient = HttpClient.newBuilder()
                 .connectTimeout(properties.connectTimeout())
                 .build();
@@ -30,9 +33,11 @@ public class AuditSourceEvidenceDeliveryClient {
                 .requestFactory(requestFactory)
                 .build();
         this.tokenProvider = tokenProvider;
+        this.observability = observability;
     }
 
     public DeliveryAcknowledgement deliver(AuditSourceEvidenceOutboxEntry entry) {
+        observability.deliveryAttempt();
         DeliveryAcknowledgement response = restClient.post()
                 .uri(INGESTION_PATH)
                 .header("Authorization", tokenProvider.createAuthorizationHeader())
