@@ -20,6 +20,12 @@ The payload contains the contract version, source service and record type, stabl
 
 The scheduled outbox relay sends only the oldest undelivered revision per booking request. Only a response matching the event ID and revision with `ACCEPTED` or `DUPLICATE` marks the row delivered. Transient transport/5xx/client failures use capped exponential backoff; after ten automatic attempts the row requires reconciliation. Permanent 4xx responses and invalid acknowledgements require reconciliation immediately. Earlier undelivered or blocked revisions prevent later revisions for that request from passing. Delivery is at-least-once, and RLC event/revision handling is idempotent and rejects stale or conflicting revisions. Evidence older than the configurable RLC freshness limit (`RLC_SOURCE_EVIDENCE_MAX_AGE`, default `PT24H`) cannot produce eligibility; missing exact owner acknowledgement, missing evidence, conflict, or stale evidence fails closed. Eligibility still does not authorize disposal.
 
+### Archive port
+
+Booking defines an `ArchiveStore` port and versioned `ArchiveManifest`; no production adapter, archive operation or disposal workflow is provided. Only the test suite contains an in-memory adapter. Per-object SHA-256 covers raw bytes; batch SHA-256 covers the ASCII domain `roomiq.archive.manifest` followed by a zero byte, then big-endian 32-bit manifest version and object count, followed for each object by its big-endian 32-bit UTF-8 ID length, UTF-8 ID bytes and raw 32-byte object digest. Objects are ordered by Java `String` natural order of valid Unicode IDs, so input reordering does not change the digest. Empty batches and duplicate IDs are rejected; verification recomputes all digests.
+
+The in-memory adapter is test-only and does not provide the WORM/object lock, encryption, access controls, independent verification, restore drills or operational monitoring required by [ADR-13](../docs/decisions/ADR-13-archive-store-port.md). No production archival readiness is implied.
+
 Configure these values only after approved deployment/key provisioning:
 
 | Setting | Purpose |
