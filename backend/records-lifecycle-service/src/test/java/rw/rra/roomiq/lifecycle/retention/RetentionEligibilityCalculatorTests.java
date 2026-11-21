@@ -19,6 +19,21 @@ class RetentionEligibilityCalculatorTests {
     private final RetentionEligibilityCalculator calculator = new RetentionEligibilityCalculator();
 
     @Test
+    void emptyScheduleProducesNoEligibleRecords() {
+        List<RetentionEvaluationInput> records = List.of(
+                new RetentionEvaluationInput(true, true, "TEST_A", POLICY_FROM, POLICY_TO,
+                        List.of(), List.of(), Map.of("ORIGINAL_EVENT", POLICY_FROM), Map.of(), true, List.of()),
+                new RetentionEvaluationInput(true, true, "TEST_B", POLICY_FROM, POLICY_TO,
+                        List.of(), List.of(), Map.of("ORIGINAL_EVENT", POLICY_FROM), Map.of(), true, List.of()));
+
+        assertThat(records.stream().map(calculator::evaluate))
+                .allSatisfy(result -> {
+                    assertThat(result.eligible()).isFalse();
+                    assertThat(result.reason()).isEqualTo(RetentionEvaluationResult.Reason.NO_APPLICABLE_POLICY);
+                });
+    }
+
+    @Test
     void appliesEffectiveFromInclusively() {
         RetentionEvaluationResult result = calculator.evaluate(input(
                 POLICY_FROM, Instant.parse("2026-01-01T00:00:00Z"),

@@ -185,7 +185,7 @@ class SourceOwnerEvidencePostgresTests {
         assertThat(ingestionService.ingest("identity-service", oldReplay).outcome())
                 .isEqualTo(SourceOwnerEvidenceOutcome.STALE);
 
-        var result = evaluationService.evaluateLatestEvidence("identity-service", "AUTHENTICATION", "record-order",
+        var result = evaluationService.evaluateLatestEvidenceAt("identity-service", "AUTHENTICATION", "record-order",
                 Instant.parse("2040-01-01T00:00:00Z"), 1L, Map.of());
         assertThat(result.evaluation().reason()).isEqualTo(RetentionEvaluationResult.Reason.OWNER_UNACKNOWLEDGED);
         assertThat(result.sourceRevision()).isEqualTo(2);
@@ -202,14 +202,14 @@ class SourceOwnerEvidencePostgresTests {
 
         assertThat(ingestionService.ingest("identity-service", conflict).outcome())
                 .isEqualTo(SourceOwnerEvidenceOutcome.CONFLICTED);
-        var blocked = evaluationService.evaluateLatestEvidence("identity-service", "AUTHENTICATION",
+        var blocked = evaluationService.evaluateLatestEvidenceAt("identity-service", "AUTHENTICATION",
                 "record-conflict", Instant.parse("2040-01-01T00:00:00Z"), 1L, Map.of());
         assertThat(blocked.evaluation().reason()).isEqualTo(RetentionEvaluationResult.Reason.SOURCE_EVIDENCE_CONFLICT);
 
         SourceOwnerEvidence correction = evidence("identity-service", "AUTHENTICATION", "record-conflict",
                 UUID.randomUUID(), 2, firstEvent, Instant.parse("2024-01-05T00:00:00Z"));
         ingestionService.ingest("identity-service", correction);
-        var current = evaluationService.evaluateLatestEvidence("identity-service", "AUTHENTICATION",
+        var current = evaluationService.evaluateLatestEvidenceAt("identity-service", "AUTHENTICATION",
                 "record-conflict", Instant.parse("2040-01-01T00:00:00Z"), 2L, Map.of());
         assertThat(current.evaluation().reason()).isEqualTo(RetentionEvaluationResult.Reason.NO_APPLICABLE_POLICY);
     }
@@ -356,7 +356,7 @@ class SourceOwnerEvidencePostgresTests {
 
         assertThat(evidenceRepository.findLatestAccepted(
                 "audit-service", "AUDIT_EVENT", eventId.toString())).isPresent();
-        var evaluated = evaluationService.evaluateLatestEvidence("audit-service", "AUDIT_EVENT",
+        var evaluated = evaluationService.evaluateLatestEvidenceAt("audit-service", "AUDIT_EVENT",
                 eventId.toString(), Instant.parse("2040-01-01T00:00:00Z"), 1L, Map.of());
         assertThat(evaluated.sourceEvidenceEventId()).isEqualTo(eventId);
         assertThat(evaluated.sourceRevision()).isEqualTo(1);
@@ -391,10 +391,10 @@ class SourceOwnerEvidencePostgresTests {
         ingestionService.ingest("booking-service", evidence);
 
         Instant evaluatedAt = start.atZone(java.time.ZoneOffset.UTC).plusYears(2).toInstant();
-        var result = evaluationService.evaluateLatestEvidence("booking-service", "BOOKING_REQUEST",
+        var result = evaluationService.evaluateLatestEvidenceAt("booking-service", "BOOKING_REQUEST",
                 recordId, evaluatedAt, 1L, Map.of());
 
-        var repeated = evaluationService.evaluateLatestEvidence("booking-service", "BOOKING_REQUEST",
+        var repeated = evaluationService.evaluateLatestEvidenceAt("booking-service", "BOOKING_REQUEST",
                 recordId, evaluatedAt, 1L, Map.of());
 
         assertThat(result.sourceEvidenceEventId()).isEqualTo(evidence.eventId());
@@ -427,7 +427,7 @@ class SourceOwnerEvidencePostgresTests {
         SourceOwnerEvidence mismatchedBasis = bookingEvidence(UUID.randomUUID().toString(), start,
                 "TEST_BOOKING_START_BASIS_MISMATCH");
         ingestionService.ingest("booking-service", mismatchedBasis);
-        var rejectedBasis = evaluationService.evaluateLatestEvidence("booking-service", "BOOKING_REQUEST",
+        var rejectedBasis = evaluationService.evaluateLatestEvidenceAt("booking-service", "BOOKING_REQUEST",
                 mismatchedBasis.recordId(), evaluatedAt, 1L, Map.of());
         assertThat(rejectedBasis.evaluation().eligible()).isFalse();
         assertThat(rejectedBasis.evaluation().reason()).isEqualTo(RetentionEvaluationResult.Reason.RULE_START_MISSING);
@@ -494,7 +494,7 @@ class SourceOwnerEvidencePostgresTests {
         ingestionService.ingest("booking-service", bookingEvidence(recordId, start, categoryCode));
         Instant evaluatedAt = start.atZone(java.time.ZoneOffset.UTC).plusYears(2).toInstant();
 
-        assertThat(evaluationService.evaluateLatestEvidence("booking-service", "BOOKING_REQUEST",
+        assertThat(evaluationService.evaluateLatestEvidenceAt("booking-service", "BOOKING_REQUEST",
                 recordId, evaluatedAt, 1L, Map.of()).evaluation().eligible()).isTrue();
 
         UUID initiator = UUID.randomUUID();
@@ -522,7 +522,7 @@ class SourceOwnerEvidencePostgresTests {
                 WHERE aggregate_type = 'HOLD' AND aggregate_id = ?
                 """, Integer.class, firstHoldId)).isEqualTo(1);
 
-        var blockedByPending = evaluationService.evaluateLatestEvidence("booking-service", "BOOKING_REQUEST",
+        var blockedByPending = evaluationService.evaluateLatestEvidenceAt("booking-service", "BOOKING_REQUEST",
                 recordId, evaluatedAt, 1L, Map.of());
         assertThat(blockedByPending.evaluation().eligible()).isFalse();
         assertThat(blockedByPending.evaluation().reason())
@@ -542,7 +542,7 @@ class SourceOwnerEvidencePostgresTests {
         recordsHoldRegistryService.requestRelease(firstHoldId,
                 new ReleaseRecordsHoldRequest("TEST_RELEASE-1"), initiator,
                 "hold-release-1", "hold-correlation-3");
-        assertThat(evaluationService.evaluateLatestEvidence("booking-service", "BOOKING_REQUEST",
+        assertThat(evaluationService.evaluateLatestEvidenceAt("booking-service", "BOOKING_REQUEST",
                 recordId, evaluatedAt, 1L, Map.of()).evaluation().reason())
                 .isEqualTo(RetentionEvaluationResult.Reason.HOLD_BLOCKS_DISPOSAL);
         assertThatThrownBy(() -> recordsHoldRegistryService.verifyRelease(firstHoldId,
@@ -555,7 +555,7 @@ class SourceOwnerEvidencePostgresTests {
         assertThat(recordsHoldRegistryService.get(firstHoldId).status())
                 .isEqualTo(RecordsHoldStatus.RELEASE_ENFORCEMENT_PENDING);
         acknowledgeDueHoldInstructions();
-        assertThat(evaluationService.evaluateLatestEvidence("booking-service", "BOOKING_REQUEST",
+        assertThat(evaluationService.evaluateLatestEvidenceAt("booking-service", "BOOKING_REQUEST",
                 recordId, evaluatedAt, 1L, Map.of()).evaluation().eligible()).isFalse();
 
         recordsHoldRegistryService.requestRelease(secondHoldId,
@@ -565,7 +565,7 @@ class SourceOwnerEvidencePostgresTests {
                 new VerifyRecordsHoldReleaseRequest("TEST_VERIFICATION-2"), initiator,
                 "hold-verify-2", "hold-correlation-7");
         acknowledgeDueHoldInstructions();
-        assertThat(evaluationService.evaluateLatestEvidence("booking-service", "BOOKING_REQUEST",
+        assertThat(evaluationService.evaluateLatestEvidenceAt("booking-service", "BOOKING_REQUEST",
                 recordId, evaluatedAt, 1L, Map.of()).evaluation().eligible()).isTrue();
         assertThat(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM lifecycle_control_event
@@ -691,14 +691,14 @@ class SourceOwnerEvidencePostgresTests {
 
     @Test
     void absentOrUnacknowledgedEvidenceCannotProduceEligibility() {
-        var absent = evaluationService.evaluateLatestEvidence("identity-service", "AUTHENTICATION",
+        var absent = evaluationService.evaluateLatestEvidenceAt("identity-service", "AUTHENTICATION",
                 "missing-record", Instant.parse("2040-01-01T00:00:00Z"), null, Map.of());
         assertThat(absent.evaluation().reason()).isEqualTo(RetentionEvaluationResult.Reason.SOURCE_EVIDENCE_MISSING);
 
         SourceOwnerEvidence evidence = evidence("identity-service", "AUTHENTICATION", "record-unacknowledged",
                 UUID.randomUUID(), 1, null, Instant.parse("2024-01-02T00:00:00Z"));
         ingestionService.ingest("identity-service", evidence);
-        var staleAcknowledgement = evaluationService.evaluateLatestEvidence("identity-service", "AUTHENTICATION",
+        var staleAcknowledgement = evaluationService.evaluateLatestEvidenceAt("identity-service", "AUTHENTICATION",
                 "record-unacknowledged", Instant.parse("2040-01-01T00:00:00Z"), null, Map.of());
         assertThat(staleAcknowledgement.evaluation().eligible()).isFalse();
         assertThat(staleAcknowledgement.evaluation().reason())
@@ -719,7 +719,7 @@ class SourceOwnerEvidencePostgresTests {
                 evidence.observedAt());
         ingestionService.ingest("identity-service", evidence);
 
-        var result = evaluationService.evaluateLatestEvidence("identity-service", "AUTHENTICATION",
+        var result = evaluationService.evaluateLatestEvidenceAt("identity-service", "AUTHENTICATION",
                 evidence.recordId(), Instant.parse("2040-01-01T00:00:00Z"), 1L, Map.of());
         assertThat(result.evaluation().eligible()).isFalse();
         assertThat(result.evaluation().reason()).isEqualTo(RetentionEvaluationResult.Reason.NO_APPLICABLE_POLICY);

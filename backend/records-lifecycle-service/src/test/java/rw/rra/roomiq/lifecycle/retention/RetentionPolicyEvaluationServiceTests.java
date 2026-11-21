@@ -20,9 +20,76 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import org.mockito.ArgumentCaptor;
 
 class RetentionPolicyEvaluationServiceTests {
+    @Test
+    void latestEvidenceEvaluationUsesClockForEvaluationAndProvenance() {
+        Instant now = Instant.parse("2026-11-12T10:00:00Z");
+        SourceOwnerEvidenceRepository source = mock(SourceOwnerEvidenceRepository.class);
+        RetentionEvaluationHistoryRepository history = mock(RetentionEvaluationHistoryRepository.class);
+        RetentionPolicyEvaluationService service = new RetentionPolicyEvaluationService(
+                mock(LifecyclePolicyVersionRepository.class), mock(LifecyclePolicyRuleRepository.class),
+                new RetentionEligibilityCalculator(), source, mock(RecordsHoldRepository.class),
+                history, Duration.ofHours(24), Clock.fixed(now, ZoneOffset.UTC));
+        when(history.append(any(), any())).thenReturn(UUID.randomUUID());
+
+        var result = service.evaluateLatestEvidence("booking-service", "BOOKING_REQUEST",
+                "record-1", null, Map.of());
+
+        var provenance = ArgumentCaptor.forClass(RetentionEvaluationHistoryProvenance.class);
+        verify(history).append(provenance.capture(), eq(null));
+        assertThat(result.evaluationAt()).isEqualTo(now);
+        assertThat(provenance.getValue().evaluationAt()).isEqualTo(now);
+        assertThat(provenance.getValue().recordedAt()).isEqualTo(now);
+    }
+
+    @Test
+    void evaluationUsesInjectedClockInsteadOfSuppliedFutureTime() {
+        Instant now = Instant.parse("2026-11-12T10:00:00Z");
+        RetentionEligibilityCalculator calculator = mock(RetentionEligibilityCalculator.class);
+        when(calculator.evaluate(any())).thenReturn(new RetentionEvaluationResult(
+                RetentionEvaluationResult.Status.NOT_ELIGIBLE,
+                RetentionEvaluationResult.Reason.NO_APPLICABLE_POLICY, null, null, List.of()));
+        RetentionPolicyEvaluationService service = new RetentionPolicyEvaluationService(
+                mock(LifecyclePolicyVersionRepository.class), mock(LifecyclePolicyRuleRepository.class),
+                calculator, mock(SourceOwnerEvidenceRepository.class), mock(RecordsHoldRepository.class),
+                mock(RetentionEvaluationHistoryRepository.class), Duration.ofHours(24),
+                Clock.fixed(now, ZoneOffset.UTC));
+
+        service.evaluate(new RetentionEvaluationEvidence(true, true, "TEST_CATEGORY", now.minusSeconds(1),
+                now.plus(Duration.ofDays(1)), Map.of(), Map.of(), true, List.of()));
+
+        var input = ArgumentCaptor.forClass(RetentionEvaluationInput.class);
+        verify(calculator).evaluate(input.capture());
+        assertThat(input.getValue().evaluationAt()).isEqualTo(now);
+    }
+
+    @Test
+    void explicitAsOfEvaluationPreservesRequestedTime() {
+        Instant now = Instant.parse("2026-11-12T10:00:00Z");
+        Instant asOf = now.plus(Duration.ofDays(1));
+        RetentionEligibilityCalculator calculator = mock(RetentionEligibilityCalculator.class);
+        when(calculator.evaluate(any())).thenReturn(new RetentionEvaluationResult(
+                RetentionEvaluationResult.Status.NOT_ELIGIBLE,
+                RetentionEvaluationResult.Reason.NO_APPLICABLE_POLICY, null, null, List.of()));
+        RetentionPolicyEvaluationService service = new RetentionPolicyEvaluationService(
+                mock(LifecyclePolicyVersionRepository.class), mock(LifecyclePolicyRuleRepository.class),
+                calculator, mock(SourceOwnerEvidenceRepository.class), mock(RecordsHoldRepository.class),
+                mock(RetentionEvaluationHistoryRepository.class), Duration.ofHours(24),
+                Clock.fixed(now, ZoneOffset.UTC));
+        service.evaluateAt(new RetentionEvaluationEvidence(true, true, "TEST_CATEGORY", now,
+                asOf, Map.of(), Map.of(), true, List.of()));
+
+        var input = ArgumentCaptor.forClass(RetentionEvaluationInput.class);
+        verify(calculator).evaluate(input.capture());
+        assertThat(input.getValue().evaluationAt()).isEqualTo(asOf);
+    }
+
     @Test
     void staleAcknowledgedSourceEvidenceCannotProduceEligibility() {
         Instant now = Instant.parse("2026-11-12T10:00:00Z");
@@ -52,7 +119,7 @@ class RetentionPolicyEvaluationServiceTests {
                 Duration.ofHours(24),
                 Clock.fixed(now, ZoneOffset.UTC));
 
-        SourceEvidenceEvaluationResult result = service.evaluateLatestEvidence(
+        SourceEvidenceEvaluationResult result = service.evaluateLatestEvidenceAt(
                 "booking-service", "BOOKING_REQUEST", "booking-1", now, 4L, Map.of());
 
         assertThat(result.evaluation().status()).isEqualTo(RetentionEvaluationResult.Status.NOT_ELIGIBLE);
